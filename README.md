@@ -16,6 +16,27 @@ A high-performance parallel file downloader with caching capabilities for HTTP/H
 
 ## Installation
 
+### Download Pre-built Binaries
+
+Download the latest release for your platform from the [releases page](https://github.com/slapshin/xget/releases):
+
+- **Linux**: `xget-linux-amd64.tar.gz`, `xget-linux-arm64.tar.gz`, `xget-linux-arm.tar.gz`
+- **macOS**: `xget-darwin-amd64.tar.gz`, `xget-darwin-arm64.tar.gz`
+- **Windows**: `xget-windows-amd64.exe.zip`, `xget-windows-arm64.exe.zip`
+
+Extract and run:
+
+```bash
+# Linux/macOS
+tar xzf xget-linux-amd64.tar.gz
+chmod +x xget-linux-amd64
+./xget-linux-amd64 config.yaml
+
+# Windows (PowerShell)
+Expand-Archive xget-windows-amd64.exe.zip
+.\xget-windows-amd64.exe config.yaml
+```
+
 ### From Source
 
 ```bash
@@ -51,6 +72,7 @@ xget <config.yaml>
 ```
 
 The tool takes a single argument - the path to a YAML configuration file that defines:
+
 - Storage endpoints (aliases)
 - Cache configuration
 - Download settings
@@ -126,17 +148,20 @@ aliases:
 ```
 
 You can also omit `access_key` and `secret_key` fields to use standard AWS environment variables:
+
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
 
 ### URL Formats
 
 **HTTP/HTTPS URLs:**
+
 ```yaml
 url: https://example.com/path/to/file.tar.gz
 ```
 
 **S3 URLs:**
+
 ```yaml
 url: s3://alias/path/to/file.tar.gz
 ```
@@ -156,6 +181,7 @@ Where `alias` references a storage endpoint defined in the `aliases` section.
 ### Partial Downloads
 
 Downloads are saved with a `.partial` suffix during transfer:
+
 - Existing partial files are automatically resumed using HTTP Range requests
 - Only renamed to final destination after successful checksum verification
 - Failed downloads leave partial file intact for next retry attempt
@@ -163,6 +189,7 @@ Downloads are saved with a `.partial` suffix during transfer:
 ### Caching Strategy
 
 The S3-based cache uses SHA256 hash as the key for content-addressable storage:
+
 - Prevents redundant downloads across different configurations
 - Deduplicates files with identical content
 - Transparently handles cache misses by falling back to source
@@ -309,6 +336,7 @@ Types: feat, fix, refactor, perf, test, docs, build, ci, chore
 ```
 
 Examples:
+
 ```
 feat: add retry mechanism for failed downloads
 fix: handle nil pointer in download manager
@@ -329,12 +357,14 @@ type Source interface {
 ```
 
 **Implementations:**
+
 - **HTTPSource** - Downloads via HTTP/HTTPS with Range request support
 - **S3Source** - Downloads from S3/MinIO using AWS SDK v2
 
 ### Download Manager
 
 The downloader uses a worker pool pattern with semaphore channel to limit concurrency:
+
 - Processes files in parallel up to configured limit
 - Handles partial file resume with `.partial` suffix
 - Implements retry logic with exponential backoff
@@ -343,6 +373,7 @@ The downloader uses a worker pool pattern with semaphore channel to limit concur
 ### Cache Layer
 
 S3-based content-addressable cache:
+
 - `Get(hash)` - Retrieves file from cache by SHA256 hash
 - `Put(hash, file)` - Uploads successfully downloaded file to cache
 - Transparent fallback to source on cache miss
