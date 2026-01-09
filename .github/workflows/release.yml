@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -53,15 +53,7 @@ jobs:
           fi
           go build -v -ldflags="-s -w" -o "dist/${OUTPUT_NAME}" xget/src
 
-          # Create archive
-          cd dist
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip "${OUTPUT_NAME}.zip" "${OUTPUT_NAME}"
-            echo "ASSET=${OUTPUT_NAME}.zip" >> $GITHUB_ENV
-          else
-            tar czf "${OUTPUT_NAME}.tar.gz" "${OUTPUT_NAME}"
-            echo "ASSET=${OUTPUT_NAME}.tar.gz" >> $GITHUB_ENV
-          fi
+          echo "ASSET=${OUTPUT_NAME}" >> $GITHUB_ENV
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
