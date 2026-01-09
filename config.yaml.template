@@ -1,0 +1,51 @@
+# Storage aliases (similar to MinIO CLI)
+aliases:
+  # AWS S3 example
+  mycloud:
+    endpoint: https://s3.amazonaws.com
+    region: us-east-1
+    bucket: my-bucket
+    access_key: ""      # optional, falls back to AWS_ACCESS_KEY_ID env var
+    secret_key: ""      # optional, falls back to AWS_SECRET_ACCESS_KEY env var
+
+  # MinIO example with env var substitution
+  minio:
+    endpoint: https://minio.company.com
+    bucket: artifacts
+    access_key: ${MINIO_ACCESS_KEY}
+    secret_key: ${MINIO_SECRET_KEY}
+
+  # Cache storage
+  cache:
+    endpoint: https://s3.amazonaws.com
+    region: us-east-1
+    bucket: download-cache
+    prefix: files/      # optional key prefix
+
+# Cache configuration - references an alias
+cache:
+  alias: cache          # use the "cache" alias defined above
+  enabled: true
+
+# Download settings
+settings:
+  parallel: 4           # max concurrent downloads
+  retries: 3            # retry attempts on failure
+  retry_delay: 5s       # delay between retries
+
+# Files to download
+files:
+  # Download from S3 using alias
+  - url: s3://mycloud/path/to/file1.tar.gz
+    dest: ./downloads/file1.tar.gz
+    sha256: abc123...
+
+  # Download from MinIO
+  - url: s3://minio/tools/file2.zip
+    dest: /opt/tools/file2.zip
+    sha256: def456...
+
+  # Download from HTTP
+  - url: https://example.com/file3.bin
+    dest: ./downloads/file3.bin
+    sha256: ghi789...

@@ -1,0 +1,75 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# CI/CD
+.github
+.gitlab-ci.yml
+.travis.yml
+.circleci
+
+# Build artifacts
+bin
+dist
+build
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test and coverage
+*.test
+*.out
+coverage.*
+*.coverprofile
+.testcache
+
+# Documentation
+*.md
+README*
+LICENSE*
+CHANGELOG*
+docs
+
+# Development tools
+Makefile
+.golangci.yml
+.editorconfig
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker files
+Dockerfile*
+.dockerignore
+docker-compose*.yml
+.docker
+
+# Configuration and secrets
+config.yaml
+config.yaml.template
+*.env
+.env*
+*.key
+*.pem
+*.crt
+
+# Temporary files
+tmp
+temp
+*.tmp
+*.log
+*.pid
+*.seed
+*.bak
+
+# Dependencies (already in container)
+vendor
+
+# Claude/AI artifacts
+.claude

@@ -1,0 +1,56 @@
+version: "2"
+linters:
+  default: none
+  enable:
+    - asasalint
+    - asciicheck
+    - bidichk
+    - bodyclose
+    - containedctx
+    - cyclop
+    - decorder
+    - errcheck
+    - errorlint
+    - gochecknoinits
+    - gocritic
+    - godot
+    - gosec
+    - govet
+    - grouper
+    - importas
+    - ineffassign
+    - lll
+    - nestif
+    - nilerr
+    - nilnil
+    - prealloc
+    - staticcheck
+    - unconvert
+    - unused
+    - usestdlibvars
+    - whitespace
+    - wsl_v5
+    - testifylint
+    - inamedparam
+    - mirror
+  settings:
+    nonamedreturns:
+      report-error-in-defer: true
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
