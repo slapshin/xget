@@ -7,8 +7,8 @@ import (
 
 var envVarPattern = regexp.MustCompile(`\$\{([^}]+)\}`)
 
-// ExpandEnvVars replaces ${VAR} patterns with environment variable values.
-func ExpandEnvVars(s string) string {
+// expandEnvVars replaces ${VAR} patterns with environment variable values.
+func expandEnvVars(s string) string {
 	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
 		// Extract variable name from ${VAR}.
 		varName := envVarPattern.FindStringSubmatch(match)[1]
@@ -25,10 +25,10 @@ func ExpandEnvVars(s string) string {
 
 // expandAliasEnvVars expands environment variables in all alias fields.
 func expandAliasEnvVars(alias *Alias) {
-	alias.Endpoint = ExpandEnvVars(alias.Endpoint)
-	alias.Region = ExpandEnvVars(alias.Region)
-	alias.Bucket = ExpandEnvVars(alias.Bucket)
-	alias.Prefix = ExpandEnvVars(alias.Prefix)
-	alias.AccessKey = ExpandEnvVars(alias.AccessKey)
-	alias.SecretKey = ExpandEnvVars(alias.SecretKey)
+	alias.Endpoint = expandEnvVars(alias.Endpoint)
+	alias.Region = expandEnvVars(alias.Region)
+	alias.Bucket = expandEnvVars(alias.Bucket)
+	alias.Prefix = expandEnvVars(alias.Prefix)
+	alias.AccessKey = expandEnvVars(alias.AccessKey)
+	alias.SecretKey = expandEnvVars(alias.SecretKey)
 }

@@ -15,6 +15,10 @@ applyTo: "**/*.go"
 - use context where possible
 - don't use multi expressions in "if" and other statements. Split to lines
 - use lowercase first letters in logger messages
+- try split such expression to separate lines:
+  "err := downloader.cache.Put(ctx, file.SHA256, file.Dest); err != nil" must be
+  "err := downloader.cache.Put(ctx, file.SHA256, file.Dest)
+    if err != nil: ... "
 
 **Error handling:**
 
