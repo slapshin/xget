@@ -90,9 +90,11 @@ files:
 	if cfg.Settings.Parallel != 5 {
 		t.Errorf("expected parallel 5, got %d", cfg.Settings.Parallel)
 	}
+
 	if cfg.Settings.Retries != 3 {
 		t.Errorf("expected retries 3, got %d", cfg.Settings.Retries)
 	}
+
 	if cfg.Settings.RetryDelay != 10*time.Second {
 		t.Errorf("expected retry_delay 10s, got %v", cfg.Settings.RetryDelay)
 	}
@@ -100,6 +102,7 @@ files:
 	if len(cfg.Files) != 1 {
 		t.Errorf("expected 1 file, got %d", len(cfg.Files))
 	}
+
 	assertFileEntry(t, cfg.Files[0], "http://example.com/file1.txt", "/tmp/file1.txt", "abc123")
 }
 
@@ -141,7 +144,6 @@ aliases:
     secret_key: secret3
 `,
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -247,7 +249,6 @@ cache:
   alias: new-cache
 `,
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -368,7 +369,6 @@ settings:
   retries: 0
 `,
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -499,6 +499,7 @@ files:
 	if !exists {
 		t.Error("expected alias1 to exist")
 	}
+
 	assertAliasFields(t, alias1, "http://new-endpoint1", "ap-south-1", "new-bucket1")
 
 	// alias2 should exist from config2
@@ -506,6 +507,7 @@ files:
 	if !exists {
 		t.Error("expected alias2 to exist")
 	}
+
 	if alias2.Endpoint != "http://endpoint2" {
 		t.Errorf("expected endpoint 'http://endpoint2', got %s", alias2.Endpoint)
 	}
@@ -527,6 +529,7 @@ files:
 	if len(cfg.Files) != 3 {
 		t.Errorf("expected 3 files, got %d", len(cfg.Files))
 	}
+
 	assertFileEntry(t, cfg.Files[0], "http://example.com/file1.txt", "/tmp/file1.txt", "abc123")
 	assertFileEntry(t, cfg.Files[1], "http://example.com/file2.txt", "/tmp/file2.txt", "def456")
 	assertFileEntry(t, cfg.Files[2], "http://example.com/file3.txt", "/tmp/file3.txt", "ghi789")
