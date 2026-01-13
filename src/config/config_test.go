@@ -21,12 +21,15 @@ func parseConfigs(t *testing.T, configs []string) (*Config, error) {
 // assertAliasFields validates all fields of an alias.
 func assertAliasFields(t *testing.T, alias Alias, endpoint, region, bucket string) {
 	t.Helper()
+
 	if alias.Endpoint != endpoint {
 		t.Errorf("expected endpoint '%s', got %s", endpoint, alias.Endpoint)
 	}
+
 	if alias.Region != region {
 		t.Errorf("expected region '%s', got %s", region, alias.Region)
 	}
+
 	if alias.Bucket != bucket {
 		t.Errorf("expected bucket '%s', got %s", bucket, alias.Bucket)
 	}
@@ -35,12 +38,15 @@ func assertAliasFields(t *testing.T, alias Alias, endpoint, region, bucket strin
 // assertFileEntry validates a file entry.
 func assertFileEntry(t *testing.T, file FileEntry, url, dest, sha256 string) {
 	t.Helper()
+
 	if file.URL != url {
 		t.Errorf("expected URL '%s', got %s", url, file.URL)
 	}
+
 	if file.Dest != dest {
 		t.Errorf("expected dest '%s', got %s", dest, file.Dest)
 	}
+
 	if file.SHA256 != sha256 {
 		t.Errorf("expected sha256 '%s', got %s", sha256, file.SHA256)
 	}
@@ -78,6 +84,7 @@ files:
 	if !exists {
 		t.Error("expected alias 'test-alias' to exist")
 	}
+
 	assertAliasFields(t, alias, "http://localhost:9000", "us-east-1", "test-bucket")
 
 	if cfg.Settings.Parallel != 5 {
@@ -144,6 +151,7 @@ aliases:
 	if !exists {
 		t.Error("expected alias1 to exist")
 	}
+
 	assertAliasFields(t, alias1, "http://new-endpoint1", "eu-west-1", "new-bucket1")
 
 	// alias2 should remain unchanged
@@ -151,6 +159,7 @@ aliases:
 	if !exists {
 		t.Error("expected alias2 to exist")
 	}
+
 	assertAliasFields(t, alias2, "http://old-endpoint2", "us-east-2", "old-bucket2")
 
 	// alias3 should be added
@@ -158,6 +167,7 @@ aliases:
 	if !exists {
 		t.Error("expected alias3 to exist")
 	}
+
 	assertAliasFields(t, alias3, "http://endpoint3", "ap-south-1", "bucket3")
 }
 
@@ -504,9 +514,11 @@ files:
 	if cfg.Settings.Parallel != 10 {
 		t.Errorf("expected parallel 10 (from config3), got %d", cfg.Settings.Parallel)
 	}
+
 	if cfg.Settings.Retries != 5 {
 		t.Errorf("expected retries 5 (from config2), got %d", cfg.Settings.Retries)
 	}
+
 	if cfg.Settings.RetryDelay != 15*time.Second {
 		t.Errorf("expected retry_delay 15s (from config3), got %v", cfg.Settings.RetryDelay)
 	}
@@ -535,7 +547,6 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -555,7 +566,6 @@ files:
 
 func TestParseMultiple_EmptyConfigList(t *testing.T) {
 	_, err := parseConfigs(t, []string{})
-
 	if err == nil {
 		t.Error("expected error but got none")
 	}
@@ -567,7 +577,6 @@ func TestParseMultiple_EmptyConfigList(t *testing.T) {
 
 func TestParseMultiple_InvalidYAML(t *testing.T) {
 	_, err := parseConfigs(t, []string{"invalid: yaml: content: ["})
-
 	if err == nil {
 		t.Error("expected error but got none")
 	}
