@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// helper function to parse configs and handle errors
+// helper function to parse configs and handle errors.
 func parseConfigs(t *testing.T, configs []string) (*Config, error) {
 	t.Helper()
 
@@ -16,6 +16,34 @@ func parseConfigs(t *testing.T, configs []string) (*Config, error) {
 	}
 
 	return ParseMultiple(configBytes)
+}
+
+// assertAliasFields validates all fields of an alias.
+func assertAliasFields(t *testing.T, alias Alias, endpoint, region, bucket string) {
+	t.Helper()
+	if alias.Endpoint != endpoint {
+		t.Errorf("expected endpoint '%s', got %s", endpoint, alias.Endpoint)
+	}
+	if alias.Region != region {
+		t.Errorf("expected region '%s', got %s", region, alias.Region)
+	}
+	if alias.Bucket != bucket {
+		t.Errorf("expected bucket '%s', got %s", bucket, alias.Bucket)
+	}
+}
+
+// assertFileEntry validates a file entry.
+func assertFileEntry(t *testing.T, file FileEntry, url, dest, sha256 string) {
+	t.Helper()
+	if file.URL != url {
+		t.Errorf("expected URL '%s', got %s", url, file.URL)
+	}
+	if file.Dest != dest {
+		t.Errorf("expected dest '%s', got %s", dest, file.Dest)
+	}
+	if file.SHA256 != sha256 {
+		t.Errorf("expected sha256 '%s', got %s", sha256, file.SHA256)
+	}
 }
 
 func TestParseMultiple_SingleConfig(t *testing.T) {
@@ -38,7 +66,6 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -51,27 +78,14 @@ files:
 	if !exists {
 		t.Error("expected alias 'test-alias' to exist")
 	}
-
-	if alias.Endpoint != "http://localhost:9000" {
-		t.Errorf("expected endpoint 'http://localhost:9000', got %s", alias.Endpoint)
-	}
-
-	if alias.Region != "us-east-1" {
-		t.Errorf("expected region 'us-east-1', got %s", alias.Region)
-	}
-
-	if alias.Bucket != "test-bucket" {
-		t.Errorf("expected bucket 'test-bucket', got %s", alias.Bucket)
-	}
+	assertAliasFields(t, alias, "http://localhost:9000", "us-east-1", "test-bucket")
 
 	if cfg.Settings.Parallel != 5 {
 		t.Errorf("expected parallel 5, got %d", cfg.Settings.Parallel)
 	}
-
 	if cfg.Settings.Retries != 3 {
 		t.Errorf("expected retries 3, got %d", cfg.Settings.Retries)
 	}
-
 	if cfg.Settings.RetryDelay != 10*time.Second {
 		t.Errorf("expected retry_delay 10s, got %v", cfg.Settings.RetryDelay)
 	}
@@ -79,18 +93,7 @@ files:
 	if len(cfg.Files) != 1 {
 		t.Errorf("expected 1 file, got %d", len(cfg.Files))
 	}
-
-	if cfg.Files[0].URL != "http://example.com/file1.txt" {
-		t.Errorf("expected URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
-	}
-
-	if cfg.Files[0].Dest != "/tmp/file1.txt" {
-		t.Errorf("expected dest '/tmp/file1.txt', got %s", cfg.Files[0].Dest)
-	}
-
-	if cfg.Files[0].SHA256 != "abc123" {
-		t.Errorf("expected sha256 'abc123', got %s", cfg.Files[0].SHA256)
-	}
+	assertFileEntry(t, cfg.Files[0], "http://example.com/file1.txt", "/tmp/file1.txt", "abc123")
 }
 
 func TestParseMultiple_AliasOverrideAndAdd(t *testing.T) {
@@ -141,46 +144,21 @@ aliases:
 	if !exists {
 		t.Error("expected alias1 to exist")
 	}
-
-	if alias1.Endpoint != "http://new-endpoint1" {
-		t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
-	}
-
-	if alias1.Region != "eu-west-1" {
-		t.Errorf("expected region 'eu-west-1', got %s", alias1.Region)
-	}
-
-	if alias1.Bucket != "new-bucket1" {
-		t.Errorf("expected bucket 'new-bucket1', got %s", alias1.Bucket)
-	}
+	assertAliasFields(t, alias1, "http://new-endpoint1", "eu-west-1", "new-bucket1")
 
 	// alias2 should remain unchanged
 	alias2, exists := cfg.Aliases["alias2"]
 	if !exists {
 		t.Error("expected alias2 to exist")
 	}
-
-	if alias2.Endpoint != "http://old-endpoint2" {
-		t.Errorf("expected endpoint 'http://old-endpoint2', got %s", alias2.Endpoint)
-	}
-
-	if alias2.Region != "us-east-2" {
-		t.Errorf("expected region 'us-east-2', got %s", alias2.Region)
-	}
+	assertAliasFields(t, alias2, "http://old-endpoint2", "us-east-2", "old-bucket2")
 
 	// alias3 should be added
 	alias3, exists := cfg.Aliases["alias3"]
 	if !exists {
 		t.Error("expected alias3 to exist")
 	}
-
-	if alias3.Endpoint != "http://endpoint3" {
-		t.Errorf("expected endpoint 'http://endpoint3', got %s", alias3.Endpoint)
-	}
-
-	if alias3.Region != "ap-south-1" {
-		t.Errorf("expected region 'ap-south-1', got %s", alias3.Region)
-	}
+	assertAliasFields(t, alias3, "http://endpoint3", "ap-south-1", "bucket3")
 }
 
 func TestParseMultiple_CacheCompleteOverride(t *testing.T) {
@@ -215,7 +193,6 @@ cache:
   enabled: true
 `,
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -337,7 +314,6 @@ settings:
   retry_delay: 20s
 `,
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -513,21 +489,13 @@ files:
 	if !exists {
 		t.Error("expected alias1 to exist")
 	}
-
-	if alias1.Endpoint != "http://new-endpoint1" {
-		t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
-	}
-
-	if alias1.Region != "ap-south-1" {
-		t.Errorf("expected region 'ap-south-1', got %s", alias1.Region)
-	}
+	assertAliasFields(t, alias1, "http://new-endpoint1", "ap-south-1", "new-bucket1")
 
 	// alias2 should exist from config2
 	alias2, exists := cfg.Aliases["alias2"]
 	if !exists {
 		t.Error("expected alias2 to exist")
 	}
-
 	if alias2.Endpoint != "http://endpoint2" {
 		t.Errorf("expected endpoint 'http://endpoint2', got %s", alias2.Endpoint)
 	}
@@ -536,11 +504,9 @@ files:
 	if cfg.Settings.Parallel != 10 {
 		t.Errorf("expected parallel 10 (from config3), got %d", cfg.Settings.Parallel)
 	}
-
 	if cfg.Settings.Retries != 5 {
 		t.Errorf("expected retries 5 (from config2), got %d", cfg.Settings.Retries)
 	}
-
 	if cfg.Settings.RetryDelay != 15*time.Second {
 		t.Errorf("expected retry_delay 15s (from config3), got %v", cfg.Settings.RetryDelay)
 	}
@@ -549,18 +515,9 @@ files:
 	if len(cfg.Files) != 3 {
 		t.Errorf("expected 3 files, got %d", len(cfg.Files))
 	}
-
-	if cfg.Files[0].URL != "http://example.com/file1.txt" {
-		t.Errorf("expected first URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
-	}
-
-	if cfg.Files[1].URL != "http://example.com/file2.txt" {
-		t.Errorf("expected second URL 'http://example.com/file2.txt', got %s", cfg.Files[1].URL)
-	}
-
-	if cfg.Files[2].URL != "http://example.com/file3.txt" {
-		t.Errorf("expected third URL 'http://example.com/file3.txt', got %s", cfg.Files[2].URL)
-	}
+	assertFileEntry(t, cfg.Files[0], "http://example.com/file1.txt", "/tmp/file1.txt", "abc123")
+	assertFileEntry(t, cfg.Files[1], "http://example.com/file2.txt", "/tmp/file2.txt", "def456")
+	assertFileEntry(t, cfg.Files[2], "http://example.com/file3.txt", "/tmp/file3.txt", "ghi789")
 }
 
 func TestParseMultiple_DefaultsApplied(t *testing.T) {
