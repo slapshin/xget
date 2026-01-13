@@ -118,6 +118,7 @@ func mergeConfigs(base *Config, override *Config) {
 	if override.Cache.Alias != "" {
 		base.Cache.Alias = override.Cache.Alias
 	}
+
 	if override.Cache.Enabled {
 		base.Cache.Enabled = true
 	}
