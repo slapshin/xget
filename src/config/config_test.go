@@ -284,7 +284,6 @@ cache:
   enabled: true
 `,
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -412,7 +411,6 @@ files:
     sha256: ghi789
 `,
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -599,7 +597,6 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `})
-
 	if err == nil {
 		t.Error("expected error but got none")
 	}
