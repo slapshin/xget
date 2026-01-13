@@ -487,7 +487,6 @@ files:
     sha256: ghi789
 `,
 	})
-
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
