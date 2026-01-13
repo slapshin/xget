@@ -6,17 +6,20 @@ import (
 	"time"
 )
 
-func TestParseMultiple(t *testing.T) {
-	tests := []struct {
-		name      string
-		configs   []string
-		wantErr   bool
-		errSubstr string
-		validate  func(t *testing.T, cfg *Config)
-	}{
-		{
-			name: "single config",
-			configs: []string{`
+// helper function to parse configs and handle errors
+func parseConfigs(t *testing.T, configs []string) (*Config, error) {
+	t.Helper()
+
+	configBytes := make([][]byte, len(configs))
+	for i, c := range configs {
+		configBytes[i] = []byte(c)
+	}
+
+	return ParseMultiple(configBytes)
+}
+
+func TestParseMultiple_SingleConfig(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -34,62 +37,65 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`},
-			validate: func(t *testing.T, cfg *Config) {
-				if len(cfg.Aliases) != 1 {
-					t.Errorf("expected 1 alias, got %d", len(cfg.Aliases))
-				}
+`})
 
-				alias, exists := cfg.Aliases["test-alias"]
-				if !exists {
-					t.Error("expected alias 'test-alias' to exist")
-				}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-				if alias.Endpoint != "http://localhost:9000" {
-					t.Errorf("expected endpoint 'http://localhost:9000', got %s", alias.Endpoint)
-				}
+	if len(cfg.Aliases) != 1 {
+		t.Errorf("expected 1 alias, got %d", len(cfg.Aliases))
+	}
 
-				if alias.Region != "us-east-1" {
-					t.Errorf("expected region 'us-east-1', got %s", alias.Region)
-				}
+	alias, exists := cfg.Aliases["test-alias"]
+	if !exists {
+		t.Error("expected alias 'test-alias' to exist")
+	}
 
-				if alias.Bucket != "test-bucket" {
-					t.Errorf("expected bucket 'test-bucket', got %s", alias.Bucket)
-				}
+	if alias.Endpoint != "http://localhost:9000" {
+		t.Errorf("expected endpoint 'http://localhost:9000', got %s", alias.Endpoint)
+	}
 
-				if cfg.Settings.Parallel != 5 {
-					t.Errorf("expected parallel 5, got %d", cfg.Settings.Parallel)
-				}
+	if alias.Region != "us-east-1" {
+		t.Errorf("expected region 'us-east-1', got %s", alias.Region)
+	}
 
-				if cfg.Settings.Retries != 3 {
-					t.Errorf("expected retries 3, got %d", cfg.Settings.Retries)
-				}
+	if alias.Bucket != "test-bucket" {
+		t.Errorf("expected bucket 'test-bucket', got %s", alias.Bucket)
+	}
 
-				if cfg.Settings.RetryDelay != 10*time.Second {
-					t.Errorf("expected retry_delay 10s, got %v", cfg.Settings.RetryDelay)
-				}
+	if cfg.Settings.Parallel != 5 {
+		t.Errorf("expected parallel 5, got %d", cfg.Settings.Parallel)
+	}
 
-				if len(cfg.Files) != 1 {
-					t.Errorf("expected 1 file, got %d", len(cfg.Files))
-				}
+	if cfg.Settings.Retries != 3 {
+		t.Errorf("expected retries 3, got %d", cfg.Settings.Retries)
+	}
 
-				if cfg.Files[0].URL != "http://example.com/file1.txt" {
-					t.Errorf("expected URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
-				}
+	if cfg.Settings.RetryDelay != 10*time.Second {
+		t.Errorf("expected retry_delay 10s, got %v", cfg.Settings.RetryDelay)
+	}
 
-				if cfg.Files[0].Dest != "/tmp/file1.txt" {
-					t.Errorf("expected dest '/tmp/file1.txt', got %s", cfg.Files[0].Dest)
-				}
+	if len(cfg.Files) != 1 {
+		t.Errorf("expected 1 file, got %d", len(cfg.Files))
+	}
 
-				if cfg.Files[0].SHA256 != "abc123" {
-					t.Errorf("expected sha256 'abc123', got %s", cfg.Files[0].SHA256)
-				}
-			},
-		},
-		{
-			name: "alias override and add",
-			configs: []string{
-				`
+	if cfg.Files[0].URL != "http://example.com/file1.txt" {
+		t.Errorf("expected URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
+	}
+
+	if cfg.Files[0].Dest != "/tmp/file1.txt" {
+		t.Errorf("expected dest '/tmp/file1.txt', got %s", cfg.Files[0].Dest)
+	}
+
+	if cfg.Files[0].SHA256 != "abc123" {
+		t.Errorf("expected sha256 'abc123', got %s", cfg.Files[0].SHA256)
+	}
+}
+
+func TestParseMultiple_AliasOverrideAndAdd(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{
+		`
 aliases:
   alias1:
     endpoint: http://old-endpoint1
@@ -109,7 +115,7 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `,
-				`
+		`
 aliases:
   alias1:
     endpoint: http://new-endpoint1
@@ -124,56 +130,62 @@ aliases:
     access_key: key3
     secret_key: secret3
 `,
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				alias1, exists := cfg.Aliases["alias1"]
-				if !exists {
-					t.Error("expected alias1 to exist")
-				}
+	})
 
-				if alias1.Endpoint != "http://new-endpoint1" {
-					t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
-				}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-				if alias1.Region != "eu-west-1" {
-					t.Errorf("expected region 'eu-west-1', got %s", alias1.Region)
-				}
+	// alias1 should be overridden
+	alias1, exists := cfg.Aliases["alias1"]
+	if !exists {
+		t.Error("expected alias1 to exist")
+	}
 
-				if alias1.Bucket != "new-bucket1" {
-					t.Errorf("expected bucket 'new-bucket1', got %s", alias1.Bucket)
-				}
+	if alias1.Endpoint != "http://new-endpoint1" {
+		t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
+	}
 
-				alias2, exists := cfg.Aliases["alias2"]
-				if !exists {
-					t.Error("expected alias2 to exist")
-				}
+	if alias1.Region != "eu-west-1" {
+		t.Errorf("expected region 'eu-west-1', got %s", alias1.Region)
+	}
 
-				if alias2.Endpoint != "http://old-endpoint2" {
-					t.Errorf("expected endpoint 'http://old-endpoint2', got %s", alias2.Endpoint)
-				}
+	if alias1.Bucket != "new-bucket1" {
+		t.Errorf("expected bucket 'new-bucket1', got %s", alias1.Bucket)
+	}
 
-				if alias2.Region != "us-east-2" {
-					t.Errorf("expected region 'us-east-2', got %s", alias2.Region)
-				}
+	// alias2 should remain unchanged
+	alias2, exists := cfg.Aliases["alias2"]
+	if !exists {
+		t.Error("expected alias2 to exist")
+	}
 
-				alias3, exists := cfg.Aliases["alias3"]
-				if !exists {
-					t.Error("expected alias3 to exist")
-				}
+	if alias2.Endpoint != "http://old-endpoint2" {
+		t.Errorf("expected endpoint 'http://old-endpoint2', got %s", alias2.Endpoint)
+	}
 
-				if alias3.Endpoint != "http://endpoint3" {
-					t.Errorf("expected endpoint 'http://endpoint3', got %s", alias3.Endpoint)
-				}
+	if alias2.Region != "us-east-2" {
+		t.Errorf("expected region 'us-east-2', got %s", alias2.Region)
+	}
 
-				if alias3.Region != "ap-south-1" {
-					t.Errorf("expected region 'ap-south-1', got %s", alias3.Region)
-				}
-			},
-		},
-		{
-			name: "cache complete override",
-			configs: []string{
-				`
+	// alias3 should be added
+	alias3, exists := cfg.Aliases["alias3"]
+	if !exists {
+		t.Error("expected alias3 to exist")
+	}
+
+	if alias3.Endpoint != "http://endpoint3" {
+		t.Errorf("expected endpoint 'http://endpoint3', got %s", alias3.Endpoint)
+	}
+
+	if alias3.Region != "ap-south-1" {
+		t.Errorf("expected region 'ap-south-1', got %s", alias3.Region)
+	}
+}
+
+func TestParseMultiple_CacheCompleteOverride(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{
+		`
 aliases:
   cache-alias:
     endpoint: http://localhost:9000
@@ -197,26 +209,29 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `,
-				`
+		`
 cache:
   alias: new-cache
   enabled: true
 `,
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if !cfg.Cache.Enabled {
-					t.Error("expected cache to be enabled")
-				}
+	})
 
-				if cfg.Cache.Alias != "new-cache" {
-					t.Errorf("expected cache alias 'new-cache', got %s", cfg.Cache.Alias)
-				}
-			},
-		},
-		{
-			name: "cache alias only override",
-			configs: []string{
-				`
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Cache.Enabled {
+		t.Error("expected cache to be enabled")
+	}
+
+	if cfg.Cache.Alias != "new-cache" {
+		t.Errorf("expected cache alias 'new-cache', got %s", cfg.Cache.Alias)
+	}
+}
+
+func TestParseMultiple_CacheAliasOnlyOverride(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{
+		`
 aliases:
   cache-alias:
     endpoint: http://localhost:9000
@@ -240,25 +255,28 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `,
-				`
+		`
 cache:
   alias: new-cache
 `,
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if !cfg.Cache.Enabled {
-					t.Error("expected cache to be enabled")
-				}
+	})
 
-				if cfg.Cache.Alias != "new-cache" {
-					t.Errorf("expected cache alias 'new-cache', got %s", cfg.Cache.Alias)
-				}
-			},
-		},
-		{
-			name: "cache enable with alias",
-			configs: []string{
-				`
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Cache.Enabled {
+		t.Error("expected cache to be enabled")
+	}
+
+	if cfg.Cache.Alias != "new-cache" {
+		t.Errorf("expected cache alias 'new-cache', got %s", cfg.Cache.Alias)
+	}
+}
+
+func TestParseMultiple_CacheEnableWithAlias(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{
+		`
 aliases:
   cache-alias:
     endpoint: http://localhost:9000
@@ -272,26 +290,29 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `,
-				`
+		`
 cache:
   alias: cache-alias
   enabled: true
 `,
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if !cfg.Cache.Enabled {
-					t.Error("expected cache to be enabled")
-				}
+	})
 
-				if cfg.Cache.Alias != "cache-alias" {
-					t.Errorf("expected cache alias 'cache-alias', got %s", cfg.Cache.Alias)
-				}
-			},
-		},
-		{
-			name: "settings partial override",
-			configs: []string{
-				`
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Cache.Enabled {
+		t.Error("expected cache to be enabled")
+	}
+
+	if cfg.Cache.Alias != "cache-alias" {
+		t.Errorf("expected cache alias 'cache-alias', got %s", cfg.Cache.Alias)
+	}
+}
+
+func TestParseMultiple_SettingsPartialOverride(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{
+		`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -310,30 +331,33 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `,
-				`
+		`
 settings:
   parallel: 10
   retry_delay: 20s
 `,
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if cfg.Settings.Parallel != 10 {
-					t.Errorf("expected parallel 10, got %d", cfg.Settings.Parallel)
-				}
+	})
 
-				if cfg.Settings.Retries != 3 {
-					t.Errorf("expected retries 3 (unchanged), got %d", cfg.Settings.Retries)
-				}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-				if cfg.Settings.RetryDelay != 20*time.Second {
-					t.Errorf("expected retry_delay 20s, got %v", cfg.Settings.RetryDelay)
-				}
-			},
-		},
-		{
-			name: "settings zero values don't override",
-			configs: []string{
-				`
+	if cfg.Settings.Parallel != 10 {
+		t.Errorf("expected parallel 10, got %d", cfg.Settings.Parallel)
+	}
+
+	if cfg.Settings.Retries != 3 {
+		t.Errorf("expected retries 3 (unchanged), got %d", cfg.Settings.Retries)
+	}
+
+	if cfg.Settings.RetryDelay != 20*time.Second {
+		t.Errorf("expected retry_delay 20s, got %v", cfg.Settings.RetryDelay)
+	}
+}
+
+func TestParseMultiple_SettingsZeroValuesDontOverride(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{
+		`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -352,30 +376,33 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `,
-				`
+		`
 settings:
   parallel: 0
   retries: 0
 `,
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if cfg.Settings.Parallel != 5 {
-					t.Errorf("expected parallel 5 (unchanged), got %d", cfg.Settings.Parallel)
-				}
+	})
 
-				if cfg.Settings.Retries != 3 {
-					t.Errorf("expected retries 3 (unchanged), got %d", cfg.Settings.Retries)
-				}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-				if cfg.Settings.RetryDelay != 10*time.Second {
-					t.Errorf("expected retry_delay 10s (unchanged), got %v", cfg.Settings.RetryDelay)
-				}
-			},
-		},
-		{
-			name: "files accumulate",
-			configs: []string{
-				`
+	if cfg.Settings.Parallel != 5 {
+		t.Errorf("expected parallel 5 (unchanged), got %d", cfg.Settings.Parallel)
+	}
+
+	if cfg.Settings.Retries != 3 {
+		t.Errorf("expected retries 3 (unchanged), got %d", cfg.Settings.Retries)
+	}
+
+	if cfg.Settings.RetryDelay != 10*time.Second {
+		t.Errorf("expected retry_delay 10s (unchanged), got %v", cfg.Settings.RetryDelay)
+	}
+}
+
+func TestParseMultiple_FilesAccumulate(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{
+		`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -389,7 +416,7 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `,
-				`
+		`
 files:
   - url: http://example.com/file2.txt
     dest: /tmp/file2.txt
@@ -398,29 +425,32 @@ files:
     dest: /tmp/file3.txt
     sha256: ghi789
 `,
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				if len(cfg.Files) != 3 {
-					t.Errorf("expected 3 files, got %d", len(cfg.Files))
-				}
+	})
 
-				if cfg.Files[0].URL != "http://example.com/file1.txt" {
-					t.Errorf("expected first URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
-				}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-				if cfg.Files[1].URL != "http://example.com/file2.txt" {
-					t.Errorf("expected second URL 'http://example.com/file2.txt', got %s", cfg.Files[1].URL)
-				}
+	if len(cfg.Files) != 3 {
+		t.Errorf("expected 3 files, got %d", len(cfg.Files))
+	}
 
-				if cfg.Files[2].URL != "http://example.com/file3.txt" {
-					t.Errorf("expected third URL 'http://example.com/file3.txt', got %s", cfg.Files[2].URL)
-				}
-			},
-		},
-		{
-			name: "three configs merge",
-			configs: []string{
-				`
+	if cfg.Files[0].URL != "http://example.com/file1.txt" {
+		t.Errorf("expected first URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
+	}
+
+	if cfg.Files[1].URL != "http://example.com/file2.txt" {
+		t.Errorf("expected second URL 'http://example.com/file2.txt', got %s", cfg.Files[1].URL)
+	}
+
+	if cfg.Files[2].URL != "http://example.com/file3.txt" {
+		t.Errorf("expected third URL 'http://example.com/file3.txt', got %s", cfg.Files[2].URL)
+	}
+}
+
+func TestParseMultiple_ThreeConfigsMerge(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{
+		`
 aliases:
   alias1:
     endpoint: http://endpoint1
@@ -437,7 +467,7 @@ files:
     dest: /tmp/file1.txt
     sha256: abc123
 `,
-				`
+		`
 aliases:
   alias2:
     endpoint: http://endpoint2
@@ -454,7 +484,7 @@ files:
     dest: /tmp/file2.txt
     sha256: def456
 `,
-				`
+		`
 aliases:
   alias1:
     endpoint: http://new-endpoint1
@@ -472,62 +502,69 @@ files:
     dest: /tmp/file3.txt
     sha256: ghi789
 `,
-			},
-			validate: func(t *testing.T, cfg *Config) {
-				alias1, exists := cfg.Aliases["alias1"]
-				if !exists {
-					t.Error("expected alias1 to exist")
-				}
+	})
 
-				if alias1.Endpoint != "http://new-endpoint1" {
-					t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
-				}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-				if alias1.Region != "ap-south-1" {
-					t.Errorf("expected region 'ap-south-1', got %s", alias1.Region)
-				}
+	// alias1 should be overridden by config3
+	alias1, exists := cfg.Aliases["alias1"]
+	if !exists {
+		t.Error("expected alias1 to exist")
+	}
 
-				alias2, exists := cfg.Aliases["alias2"]
-				if !exists {
-					t.Error("expected alias2 to exist")
-				}
+	if alias1.Endpoint != "http://new-endpoint1" {
+		t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
+	}
 
-				if alias2.Endpoint != "http://endpoint2" {
-					t.Errorf("expected endpoint 'http://endpoint2', got %s", alias2.Endpoint)
-				}
+	if alias1.Region != "ap-south-1" {
+		t.Errorf("expected region 'ap-south-1', got %s", alias1.Region)
+	}
 
-				if cfg.Settings.Parallel != 10 {
-					t.Errorf("expected parallel 10 (from config3), got %d", cfg.Settings.Parallel)
-				}
+	// alias2 should exist from config2
+	alias2, exists := cfg.Aliases["alias2"]
+	if !exists {
+		t.Error("expected alias2 to exist")
+	}
 
-				if cfg.Settings.Retries != 5 {
-					t.Errorf("expected retries 5 (from config2), got %d", cfg.Settings.Retries)
-				}
+	if alias2.Endpoint != "http://endpoint2" {
+		t.Errorf("expected endpoint 'http://endpoint2', got %s", alias2.Endpoint)
+	}
 
-				if cfg.Settings.RetryDelay != 15*time.Second {
-					t.Errorf("expected retry_delay 15s (from config3), got %v", cfg.Settings.RetryDelay)
-				}
+	// settings should be merged from all configs
+	if cfg.Settings.Parallel != 10 {
+		t.Errorf("expected parallel 10 (from config3), got %d", cfg.Settings.Parallel)
+	}
 
-				if len(cfg.Files) != 3 {
-					t.Errorf("expected 3 files, got %d", len(cfg.Files))
-				}
+	if cfg.Settings.Retries != 5 {
+		t.Errorf("expected retries 5 (from config2), got %d", cfg.Settings.Retries)
+	}
 
-				if cfg.Files[0].URL != "http://example.com/file1.txt" {
-					t.Errorf("expected first URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
-				}
+	if cfg.Settings.RetryDelay != 15*time.Second {
+		t.Errorf("expected retry_delay 15s (from config3), got %v", cfg.Settings.RetryDelay)
+	}
 
-				if cfg.Files[1].URL != "http://example.com/file2.txt" {
-					t.Errorf("expected second URL 'http://example.com/file2.txt', got %s", cfg.Files[1].URL)
-				}
+	// files should accumulate from all configs
+	if len(cfg.Files) != 3 {
+		t.Errorf("expected 3 files, got %d", len(cfg.Files))
+	}
 
-				if cfg.Files[2].URL != "http://example.com/file3.txt" {
-					t.Errorf("expected third URL 'http://example.com/file3.txt', got %s", cfg.Files[2].URL)
-				}
-			},
-		},
-		{
-			name: "defaults applied",
-			configs: []string{`
+	if cfg.Files[0].URL != "http://example.com/file1.txt" {
+		t.Errorf("expected first URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
+	}
+
+	if cfg.Files[1].URL != "http://example.com/file2.txt" {
+		t.Errorf("expected second URL 'http://example.com/file2.txt', got %s", cfg.Files[1].URL)
+	}
+
+	if cfg.Files[2].URL != "http://example.com/file3.txt" {
+		t.Errorf("expected third URL 'http://example.com/file3.txt', got %s", cfg.Files[2].URL)
+	}
+}
+
+func TestParseMultiple_DefaultsApplied(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -540,36 +577,51 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`},
-			validate: func(t *testing.T, cfg *Config) {
-				if cfg.Settings.Parallel != defaultParallel {
-					t.Errorf("expected parallel %d, got %d", defaultParallel, cfg.Settings.Parallel)
-				}
+`})
 
-				if cfg.Settings.Retries != defaultRetries {
-					t.Errorf("expected retries %d, got %d", defaultRetries, cfg.Settings.Retries)
-				}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
-				if cfg.Settings.RetryDelay != defaultRetryDelay {
-					t.Errorf("expected retry_delay %v, got %v", defaultRetryDelay, cfg.Settings.RetryDelay)
-				}
-			},
-		},
-		{
-			name:      "empty config list",
-			configs:   []string{},
-			wantErr:   true,
-			errSubstr: "no configs specified",
-		},
-		{
-			name:      "invalid yaml",
-			configs:   []string{"invalid: yaml: content: ["},
-			wantErr:   true,
-			errSubstr: "parsing config",
-		},
-		{
-			name: "validation error - cache enabled without alias",
-			configs: []string{`
+	if cfg.Settings.Parallel != defaultParallel {
+		t.Errorf("expected parallel %d, got %d", defaultParallel, cfg.Settings.Parallel)
+	}
+
+	if cfg.Settings.Retries != defaultRetries {
+		t.Errorf("expected retries %d, got %d", defaultRetries, cfg.Settings.Retries)
+	}
+
+	if cfg.Settings.RetryDelay != defaultRetryDelay {
+		t.Errorf("expected retry_delay %v, got %v", defaultRetryDelay, cfg.Settings.RetryDelay)
+	}
+}
+
+func TestParseMultiple_EmptyConfigList(t *testing.T) {
+	_, err := parseConfigs(t, []string{})
+
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "no configs specified") {
+		t.Errorf("expected error containing 'no configs specified', got: %v", err)
+	}
+}
+
+func TestParseMultiple_InvalidYAML(t *testing.T) {
+	_, err := parseConfigs(t, []string{"invalid: yaml: content: ["})
+
+	if err == nil {
+		t.Error("expected error but got none")
+	}
+
+	if !strings.Contains(err.Error(), "parsing config") {
+		t.Errorf("expected error containing 'parsing config', got: %v", err)
+	}
+}
+
+func TestParseMultiple_ValidationError(t *testing.T) {
+	_, err := parseConfigs(t, []string{`
 cache:
   enabled: true
 
@@ -577,39 +629,14 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`},
-			wantErr:   true,
-			errSubstr: "validating merged config",
-		},
+`})
+
+	if err == nil {
+		t.Error("expected error but got none")
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			configBytes := make([][]byte, len(tt.configs))
-			for i, c := range tt.configs {
-				configBytes[i] = []byte(c)
-			}
-
-			cfg, err := ParseMultiple(configBytes)
-
-			if tt.wantErr {
-				if err == nil {
-					t.Error("expected error but got none")
-				} else if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
-					t.Errorf("expected error containing %q, got: %v", tt.errSubstr, err)
-				}
-
-				return
-			}
-
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-
-			if tt.validate != nil {
-				tt.validate(t, cfg)
-			}
-		})
+	if !strings.Contains(err.Error(), "validating merged config") {
+		t.Errorf("expected error containing 'validating merged config', got: %v", err)
 	}
 }
 
