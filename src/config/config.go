@@ -115,8 +115,11 @@ func mergeConfigs(base *Config, override *Config) {
 	}
 
 	// Override cache settings if specified.
-	if override.Cache.Alias != "" || override.Cache.Enabled {
-		base.Cache = override.Cache
+	if override.Cache.Alias != "" {
+		base.Cache.Alias = override.Cache.Alias
+	}
+	if override.Cache.Enabled {
+		base.Cache.Enabled = true
 	}
 
 	// Override settings if specified (non-zero values).
