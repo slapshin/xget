@@ -82,17 +82,57 @@ func LoadMultiple(paths []string) (*Config, error) {
 	return baseConfig, nil
 }
 
+// ParseMultiple parses and merges multiple YAML config contents.
+// Later configs override earlier ones for aliases, cache, and settings.
+// Files are accumulated across all configs.
+func ParseMultiple(configs [][]byte) (*Config, error) {
+	if len(configs) == 0 {
+		return nil, fmt.Errorf("no configs specified")
+	}
+
+	// Parse first config without validation.
+	baseConfig, err := parseWithoutValidation(configs[0])
+	if err != nil {
+		return nil, fmt.Errorf("parsing config 0: %w", err)
+	}
+
+	// Merge remaining configs.
+	for i, data := range configs[1:] {
+		cfg, err := parseWithoutValidation(data)
+		if err != nil {
+			return nil, fmt.Errorf("parsing config %d: %w", i+1, err)
+		}
+
+		mergeConfigs(baseConfig, cfg)
+	}
+
+	// Apply defaults.
+	applyDefaults(baseConfig)
+
+	// Validate merged configuration.
+	err = validate(baseConfig)
+	if err != nil {
+		return nil, fmt.Errorf("validating merged config: %w", err)
+	}
+
+	return baseConfig, nil
+}
+
 func loadWithoutValidation(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
 	}
 
+	return parseWithoutValidation(data)
+}
+
+func parseWithoutValidation(data []byte) (*Config, error) {
 	var cfg Config
 
-	err = yaml.Unmarshal(data, &cfg)
+	err := yaml.Unmarshal(data, &cfg)
 	if err != nil {
-		return nil, fmt.Errorf("parsing config file: %w", err)
+		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
 	// Expand environment variables in aliases.

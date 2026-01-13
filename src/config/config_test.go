@@ -1,18 +1,22 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-func TestLoadMultiple_SingleConfig(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	configPath := filepath.Join(tmpDir, "config.yaml")
-	configContent := `
+func TestParseMultiple(t *testing.T) {
+	tests := []struct {
+		name      string
+		configs   []string
+		wantErr   bool
+		errSubstr string
+		validate  func(t *testing.T, cfg *Config)
+	}{
+		{
+			name: "single config",
+			configs: []string{`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -30,80 +34,62 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(configPath, []byte(configContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write config file: %v", err)
-	}
+`},
+			validate: func(t *testing.T, cfg *Config) {
+				if len(cfg.Aliases) != 1 {
+					t.Errorf("expected 1 alias, got %d", len(cfg.Aliases))
+				}
 
-	cfg, err := LoadMultiple([]string{configPath})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
+				alias, exists := cfg.Aliases["test-alias"]
+				if !exists {
+					t.Error("expected alias 'test-alias' to exist")
+				}
 
-	if cfg == nil {
-		t.Fatal("expected config to be non-nil")
-	}
+				if alias.Endpoint != "http://localhost:9000" {
+					t.Errorf("expected endpoint 'http://localhost:9000', got %s", alias.Endpoint)
+				}
 
-	// Verify aliases.
-	if len(cfg.Aliases) != 1 {
-		t.Errorf("expected 1 alias, got %d", len(cfg.Aliases))
-	}
+				if alias.Region != "us-east-1" {
+					t.Errorf("expected region 'us-east-1', got %s", alias.Region)
+				}
 
-	alias, exists := cfg.Aliases["test-alias"]
-	if !exists {
-		t.Error("expected alias 'test-alias' to exist")
-	}
+				if alias.Bucket != "test-bucket" {
+					t.Errorf("expected bucket 'test-bucket', got %s", alias.Bucket)
+				}
 
-	if alias.Endpoint != "http://localhost:9000" {
-		t.Errorf("expected endpoint 'http://localhost:9000', got %s", alias.Endpoint)
-	}
+				if cfg.Settings.Parallel != 5 {
+					t.Errorf("expected parallel 5, got %d", cfg.Settings.Parallel)
+				}
 
-	if alias.Region != "us-east-1" {
-		t.Errorf("expected region 'us-east-1', got %s", alias.Region)
-	}
+				if cfg.Settings.Retries != 3 {
+					t.Errorf("expected retries 3, got %d", cfg.Settings.Retries)
+				}
 
-	if alias.Bucket != "test-bucket" {
-		t.Errorf("expected bucket 'test-bucket', got %s", alias.Bucket)
-	}
+				if cfg.Settings.RetryDelay != 10*time.Second {
+					t.Errorf("expected retry_delay 10s, got %v", cfg.Settings.RetryDelay)
+				}
 
-	// Verify settings.
-	if cfg.Settings.Parallel != 5 {
-		t.Errorf("expected parallel 5, got %d", cfg.Settings.Parallel)
-	}
+				if len(cfg.Files) != 1 {
+					t.Errorf("expected 1 file, got %d", len(cfg.Files))
+				}
 
-	if cfg.Settings.Retries != 3 {
-		t.Errorf("expected retries 3, got %d", cfg.Settings.Retries)
-	}
+				if cfg.Files[0].URL != "http://example.com/file1.txt" {
+					t.Errorf("expected URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
+				}
 
-	if cfg.Settings.RetryDelay != 10*time.Second {
-		t.Errorf("expected retry_delay 10s, got %v", cfg.Settings.RetryDelay)
-	}
+				if cfg.Files[0].Dest != "/tmp/file1.txt" {
+					t.Errorf("expected dest '/tmp/file1.txt', got %s", cfg.Files[0].Dest)
+				}
 
-	// Verify files.
-	if len(cfg.Files) != 1 {
-		t.Errorf("expected 1 file, got %d", len(cfg.Files))
-	}
-
-	if cfg.Files[0].URL != "http://example.com/file1.txt" {
-		t.Errorf("expected URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
-	}
-
-	if cfg.Files[0].Dest != "/tmp/file1.txt" {
-		t.Errorf("expected dest '/tmp/file1.txt', got %s", cfg.Files[0].Dest)
-	}
-
-	if cfg.Files[0].SHA256 != "abc123" {
-		t.Errorf("expected sha256 'abc123', got %s", cfg.Files[0].SHA256)
-	}
-}
-
-func TestLoadMultiple_AliasOverride(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Base config with two aliases.
-	baseConfig := filepath.Join(tmpDir, "base.yaml")
-	baseContent := `
+				if cfg.Files[0].SHA256 != "abc123" {
+					t.Errorf("expected sha256 'abc123', got %s", cfg.Files[0].SHA256)
+				}
+			},
+		},
+		{
+			name: "alias override and add",
+			configs: []string{
+				`
 aliases:
   alias1:
     endpoint: http://old-endpoint1
@@ -122,15 +108,8 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(baseConfig, []byte(baseContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write base config: %v", err)
-	}
-
-	// Override config that overrides alias1 and adds alias3.
-	overrideConfig := filepath.Join(tmpDir, "override.yaml")
-	overrideContent := `
+`,
+				`
 aliases:
   alias1:
     endpoint: http://new-endpoint1
@@ -144,70 +123,57 @@ aliases:
     bucket: bucket3
     access_key: key3
     secret_key: secret3
-`
-	err = os.WriteFile(overrideConfig, []byte(overrideContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write override config: %v", err)
-	}
+`,
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				alias1, exists := cfg.Aliases["alias1"]
+				if !exists {
+					t.Error("expected alias1 to exist")
+				}
 
-	cfg, err := LoadMultiple([]string{baseConfig, overrideConfig})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
+				if alias1.Endpoint != "http://new-endpoint1" {
+					t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
+				}
 
-	// Verify alias1 was overridden.
-	alias1, exists := cfg.Aliases["alias1"]
-	if !exists {
-		t.Error("expected alias1 to exist")
-	}
+				if alias1.Region != "eu-west-1" {
+					t.Errorf("expected region 'eu-west-1', got %s", alias1.Region)
+				}
 
-	if alias1.Endpoint != "http://new-endpoint1" {
-		t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
-	}
+				if alias1.Bucket != "new-bucket1" {
+					t.Errorf("expected bucket 'new-bucket1', got %s", alias1.Bucket)
+				}
 
-	if alias1.Region != "eu-west-1" {
-		t.Errorf("expected region 'eu-west-1', got %s", alias1.Region)
-	}
+				alias2, exists := cfg.Aliases["alias2"]
+				if !exists {
+					t.Error("expected alias2 to exist")
+				}
 
-	if alias1.Bucket != "new-bucket1" {
-		t.Errorf("expected bucket 'new-bucket1', got %s", alias1.Bucket)
-	}
+				if alias2.Endpoint != "http://old-endpoint2" {
+					t.Errorf("expected endpoint 'http://old-endpoint2', got %s", alias2.Endpoint)
+				}
 
-	// Verify alias2 remains unchanged.
-	alias2, exists := cfg.Aliases["alias2"]
-	if !exists {
-		t.Error("expected alias2 to exist")
-	}
+				if alias2.Region != "us-east-2" {
+					t.Errorf("expected region 'us-east-2', got %s", alias2.Region)
+				}
 
-	if alias2.Endpoint != "http://old-endpoint2" {
-		t.Errorf("expected endpoint 'http://old-endpoint2', got %s", alias2.Endpoint)
-	}
+				alias3, exists := cfg.Aliases["alias3"]
+				if !exists {
+					t.Error("expected alias3 to exist")
+				}
 
-	if alias2.Region != "us-east-2" {
-		t.Errorf("expected region 'us-east-2', got %s", alias2.Region)
-	}
+				if alias3.Endpoint != "http://endpoint3" {
+					t.Errorf("expected endpoint 'http://endpoint3', got %s", alias3.Endpoint)
+				}
 
-	// Verify alias3 was added.
-	alias3, exists := cfg.Aliases["alias3"]
-	if !exists {
-		t.Error("expected alias3 to exist")
-	}
-
-	if alias3.Endpoint != "http://endpoint3" {
-		t.Errorf("expected endpoint 'http://endpoint3', got %s", alias3.Endpoint)
-	}
-
-	if alias3.Region != "ap-south-1" {
-		t.Errorf("expected region 'ap-south-1', got %s", alias3.Region)
-	}
-}
-
-func TestLoadMultiple_CacheOverride(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Base config with cache enabled.
-	baseConfig := filepath.Join(tmpDir, "base.yaml")
-	baseContent := `
+				if alias3.Region != "ap-south-1" {
+					t.Errorf("expected region 'ap-south-1', got %s", alias3.Region)
+				}
+			},
+		},
+		{
+			name: "cache complete override",
+			configs: []string{
+				`
 aliases:
   cache-alias:
     endpoint: http://localhost:9000
@@ -230,45 +196,27 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(baseConfig, []byte(baseContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write base config: %v", err)
-	}
-
-	// Override config with different cache alias.
-	overrideConfig := filepath.Join(tmpDir, "override.yaml")
-	overrideContent := `
+`,
+				`
 cache:
   alias: new-cache
   enabled: true
-`
-	err = os.WriteFile(overrideConfig, []byte(overrideContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write override config: %v", err)
-	}
+`,
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if !cfg.Cache.Enabled {
+					t.Error("expected cache to be enabled")
+				}
 
-	cfg, err := LoadMultiple([]string{baseConfig, overrideConfig})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
-
-	// Verify cache was overridden.
-	if !cfg.Cache.Enabled {
-		t.Error("expected cache to be enabled")
-	}
-
-	if cfg.Cache.Alias != "new-cache" {
-		t.Errorf("expected cache alias 'new-cache', got %s", cfg.Cache.Alias)
-	}
-}
-
-func TestLoadMultiple_CacheAliasOnly(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Base config with cache enabled.
-	baseConfig := filepath.Join(tmpDir, "base.yaml")
-	baseContent := `
+				if cfg.Cache.Alias != "new-cache" {
+					t.Errorf("expected cache alias 'new-cache', got %s", cfg.Cache.Alias)
+				}
+			},
+		},
+		{
+			name: "cache alias only override",
+			configs: []string{
+				`
 aliases:
   cache-alias:
     endpoint: http://localhost:9000
@@ -291,44 +239,26 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(baseConfig, []byte(baseContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write base config: %v", err)
-	}
-
-	// Override config with only alias (no enabled field).
-	overrideConfig := filepath.Join(tmpDir, "override.yaml")
-	overrideContent := `
+`,
+				`
 cache:
   alias: new-cache
-`
-	err = os.WriteFile(overrideConfig, []byte(overrideContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write override config: %v", err)
-	}
+`,
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if !cfg.Cache.Enabled {
+					t.Error("expected cache to be enabled")
+				}
 
-	cfg, err := LoadMultiple([]string{baseConfig, overrideConfig})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
-
-	// Verify cache alias was overridden but enabled stays true from base.
-	if !cfg.Cache.Enabled {
-		t.Error("expected cache to be enabled")
-	}
-
-	if cfg.Cache.Alias != "new-cache" {
-		t.Errorf("expected cache alias 'new-cache', got %s", cfg.Cache.Alias)
-	}
-}
-
-func TestLoadMultiple_CacheEnableOnly(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Base config without cache.
-	baseConfig := filepath.Join(tmpDir, "base.yaml")
-	baseContent := `
+				if cfg.Cache.Alias != "new-cache" {
+					t.Errorf("expected cache alias 'new-cache', got %s", cfg.Cache.Alias)
+				}
+			},
+		},
+		{
+			name: "cache enable with alias",
+			configs: []string{
+				`
 aliases:
   cache-alias:
     endpoint: http://localhost:9000
@@ -341,45 +271,27 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(baseConfig, []byte(baseContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write base config: %v", err)
-	}
-
-	// Override config that enables cache with alias.
-	overrideConfig := filepath.Join(tmpDir, "override.yaml")
-	overrideContent := `
+`,
+				`
 cache:
   alias: cache-alias
   enabled: true
-`
-	err = os.WriteFile(overrideConfig, []byte(overrideContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write override config: %v", err)
-	}
+`,
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if !cfg.Cache.Enabled {
+					t.Error("expected cache to be enabled")
+				}
 
-	cfg, err := LoadMultiple([]string{baseConfig, overrideConfig})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
-
-	// Verify cache was enabled.
-	if !cfg.Cache.Enabled {
-		t.Error("expected cache to be enabled")
-	}
-
-	if cfg.Cache.Alias != "cache-alias" {
-		t.Errorf("expected cache alias 'cache-alias', got %s", cfg.Cache.Alias)
-	}
-}
-
-func TestLoadMultiple_SettingsOverride(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Base config with settings.
-	baseConfig := filepath.Join(tmpDir, "base.yaml")
-	baseContent := `
+				if cfg.Cache.Alias != "cache-alias" {
+					t.Errorf("expected cache alias 'cache-alias', got %s", cfg.Cache.Alias)
+				}
+			},
+		},
+		{
+			name: "settings partial override",
+			configs: []string{
+				`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -397,49 +309,31 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(baseConfig, []byte(baseContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write base config: %v", err)
-	}
-
-	// Override config with partial settings override.
-	overrideConfig := filepath.Join(tmpDir, "override.yaml")
-	overrideContent := `
+`,
+				`
 settings:
   parallel: 10
   retry_delay: 20s
-`
-	err = os.WriteFile(overrideConfig, []byte(overrideContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write override config: %v", err)
-	}
+`,
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.Settings.Parallel != 10 {
+					t.Errorf("expected parallel 10, got %d", cfg.Settings.Parallel)
+				}
 
-	cfg, err := LoadMultiple([]string{baseConfig, overrideConfig})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
+				if cfg.Settings.Retries != 3 {
+					t.Errorf("expected retries 3 (unchanged), got %d", cfg.Settings.Retries)
+				}
 
-	// Verify partial override.
-	if cfg.Settings.Parallel != 10 {
-		t.Errorf("expected parallel 10, got %d", cfg.Settings.Parallel)
-	}
-
-	if cfg.Settings.Retries != 3 {
-		t.Errorf("expected retries 3 (unchanged), got %d", cfg.Settings.Retries)
-	}
-
-	if cfg.Settings.RetryDelay != 20*time.Second {
-		t.Errorf("expected retry_delay 20s, got %v", cfg.Settings.RetryDelay)
-	}
-}
-
-func TestLoadMultiple_SettingsZeroValue(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Base config with settings.
-	baseConfig := filepath.Join(tmpDir, "base.yaml")
-	baseContent := `
+				if cfg.Settings.RetryDelay != 20*time.Second {
+					t.Errorf("expected retry_delay 20s, got %v", cfg.Settings.RetryDelay)
+				}
+			},
+		},
+		{
+			name: "settings zero values don't override",
+			configs: []string{
+				`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -457,49 +351,31 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(baseConfig, []byte(baseContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write base config: %v", err)
-	}
-
-	// Override config with no settings (zero values).
-	overrideConfig := filepath.Join(tmpDir, "override.yaml")
-	overrideContent := `
+`,
+				`
 settings:
   parallel: 0
   retries: 0
-`
-	err = os.WriteFile(overrideConfig, []byte(overrideContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write override config: %v", err)
-	}
+`,
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.Settings.Parallel != 5 {
+					t.Errorf("expected parallel 5 (unchanged), got %d", cfg.Settings.Parallel)
+				}
 
-	cfg, err := LoadMultiple([]string{baseConfig, overrideConfig})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
+				if cfg.Settings.Retries != 3 {
+					t.Errorf("expected retries 3 (unchanged), got %d", cfg.Settings.Retries)
+				}
 
-	// Verify zero values don't override.
-	if cfg.Settings.Parallel != 5 {
-		t.Errorf("expected parallel 5 (unchanged), got %d", cfg.Settings.Parallel)
-	}
-
-	if cfg.Settings.Retries != 3 {
-		t.Errorf("expected retries 3 (unchanged), got %d", cfg.Settings.Retries)
-	}
-
-	if cfg.Settings.RetryDelay != 10*time.Second {
-		t.Errorf("expected retry_delay 10s (unchanged), got %v", cfg.Settings.RetryDelay)
-	}
-}
-
-func TestLoadMultiple_FilesAccumulate(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Base config with one file.
-	baseConfig := filepath.Join(tmpDir, "base.yaml")
-	baseContent := `
+				if cfg.Settings.RetryDelay != 10*time.Second {
+					t.Errorf("expected retry_delay 10s (unchanged), got %v", cfg.Settings.RetryDelay)
+				}
+			},
+		},
+		{
+			name: "files accumulate",
+			configs: []string{
+				`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -512,15 +388,8 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(baseConfig, []byte(baseContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write base config: %v", err)
-	}
-
-	// Override config with additional files.
-	overrideConfig := filepath.Join(tmpDir, "override.yaml")
-	overrideContent := `
+`,
+				`
 files:
   - url: http://example.com/file2.txt
     dest: /tmp/file2.txt
@@ -528,41 +397,30 @@ files:
   - url: http://example.com/file3.txt
     dest: /tmp/file3.txt
     sha256: ghi789
-`
-	err = os.WriteFile(overrideConfig, []byte(overrideContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write override config: %v", err)
-	}
+`,
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				if len(cfg.Files) != 3 {
+					t.Errorf("expected 3 files, got %d", len(cfg.Files))
+				}
 
-	cfg, err := LoadMultiple([]string{baseConfig, overrideConfig})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
+				if cfg.Files[0].URL != "http://example.com/file1.txt" {
+					t.Errorf("expected first URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
+				}
 
-	// Verify files were accumulated.
-	if len(cfg.Files) != 3 {
-		t.Errorf("expected 3 files, got %d", len(cfg.Files))
-	}
+				if cfg.Files[1].URL != "http://example.com/file2.txt" {
+					t.Errorf("expected second URL 'http://example.com/file2.txt', got %s", cfg.Files[1].URL)
+				}
 
-	if cfg.Files[0].URL != "http://example.com/file1.txt" {
-		t.Errorf("expected first URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
-	}
-
-	if cfg.Files[1].URL != "http://example.com/file2.txt" {
-		t.Errorf("expected second URL 'http://example.com/file2.txt', got %s", cfg.Files[1].URL)
-	}
-
-	if cfg.Files[2].URL != "http://example.com/file3.txt" {
-		t.Errorf("expected third URL 'http://example.com/file3.txt', got %s", cfg.Files[2].URL)
-	}
-}
-
-func TestLoadMultiple_ThreeConfigs(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Base config.
-	baseConfig := filepath.Join(tmpDir, "base.yaml")
-	baseContent := `
+				if cfg.Files[2].URL != "http://example.com/file3.txt" {
+					t.Errorf("expected third URL 'http://example.com/file3.txt', got %s", cfg.Files[2].URL)
+				}
+			},
+		},
+		{
+			name: "three configs merge",
+			configs: []string{
+				`
 aliases:
   alias1:
     endpoint: http://endpoint1
@@ -578,15 +436,8 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(baseConfig, []byte(baseContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write base config: %v", err)
-	}
-
-	// Second config.
-	config2 := filepath.Join(tmpDir, "config2.yaml")
-	config2Content := `
+`,
+				`
 aliases:
   alias2:
     endpoint: http://endpoint2
@@ -602,15 +453,8 @@ files:
   - url: http://example.com/file2.txt
     dest: /tmp/file2.txt
     sha256: def456
-`
-	err = os.WriteFile(config2, []byte(config2Content), 0644)
-	if err != nil {
-		t.Fatalf("failed to write config2: %v", err)
-	}
-
-	// Third config.
-	config3 := filepath.Join(tmpDir, "config3.yaml")
-	config3Content := `
+`,
+				`
 aliases:
   alias1:
     endpoint: http://new-endpoint1
@@ -627,148 +471,63 @@ files:
   - url: http://example.com/file3.txt
     dest: /tmp/file3.txt
     sha256: ghi789
-`
-	err = os.WriteFile(config3, []byte(config3Content), 0644)
-	if err != nil {
-		t.Fatalf("failed to write config3: %v", err)
-	}
+`,
+			},
+			validate: func(t *testing.T, cfg *Config) {
+				alias1, exists := cfg.Aliases["alias1"]
+				if !exists {
+					t.Error("expected alias1 to exist")
+				}
 
-	cfg, err := LoadMultiple([]string{baseConfig, config2, config3})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
+				if alias1.Endpoint != "http://new-endpoint1" {
+					t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
+				}
 
-	// Verify alias1 was overridden by config3.
-	alias1, exists := cfg.Aliases["alias1"]
-	if !exists {
-		t.Error("expected alias1 to exist")
-	}
+				if alias1.Region != "ap-south-1" {
+					t.Errorf("expected region 'ap-south-1', got %s", alias1.Region)
+				}
 
-	if alias1.Endpoint != "http://new-endpoint1" {
-		t.Errorf("expected endpoint 'http://new-endpoint1', got %s", alias1.Endpoint)
-	}
+				alias2, exists := cfg.Aliases["alias2"]
+				if !exists {
+					t.Error("expected alias2 to exist")
+				}
 
-	if alias1.Region != "ap-south-1" {
-		t.Errorf("expected region 'ap-south-1', got %s", alias1.Region)
-	}
+				if alias2.Endpoint != "http://endpoint2" {
+					t.Errorf("expected endpoint 'http://endpoint2', got %s", alias2.Endpoint)
+				}
 
-	// Verify alias2 from config2 exists.
-	alias2, exists := cfg.Aliases["alias2"]
-	if !exists {
-		t.Error("expected alias2 to exist")
-	}
+				if cfg.Settings.Parallel != 10 {
+					t.Errorf("expected parallel 10 (from config3), got %d", cfg.Settings.Parallel)
+				}
 
-	if alias2.Endpoint != "http://endpoint2" {
-		t.Errorf("expected endpoint 'http://endpoint2', got %s", alias2.Endpoint)
-	}
+				if cfg.Settings.Retries != 5 {
+					t.Errorf("expected retries 5 (from config2), got %d", cfg.Settings.Retries)
+				}
 
-	// Verify settings from all configs.
-	if cfg.Settings.Parallel != 10 {
-		t.Errorf("expected parallel 10 (from config3), got %d", cfg.Settings.Parallel)
-	}
+				if cfg.Settings.RetryDelay != 15*time.Second {
+					t.Errorf("expected retry_delay 15s (from config3), got %v", cfg.Settings.RetryDelay)
+				}
 
-	if cfg.Settings.Retries != 5 {
-		t.Errorf("expected retries 5 (from config2), got %d", cfg.Settings.Retries)
-	}
+				if len(cfg.Files) != 3 {
+					t.Errorf("expected 3 files, got %d", len(cfg.Files))
+				}
 
-	if cfg.Settings.RetryDelay != 15*time.Second {
-		t.Errorf("expected retry_delay 15s (from config3), got %v", cfg.Settings.RetryDelay)
-	}
+				if cfg.Files[0].URL != "http://example.com/file1.txt" {
+					t.Errorf("expected first URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
+				}
 
-	// Verify all files accumulated.
-	if len(cfg.Files) != 3 {
-		t.Errorf("expected 3 files, got %d", len(cfg.Files))
-	}
+				if cfg.Files[1].URL != "http://example.com/file2.txt" {
+					t.Errorf("expected second URL 'http://example.com/file2.txt', got %s", cfg.Files[1].URL)
+				}
 
-	if cfg.Files[0].URL != "http://example.com/file1.txt" {
-		t.Errorf("expected first URL 'http://example.com/file1.txt', got %s", cfg.Files[0].URL)
-	}
-
-	if cfg.Files[1].URL != "http://example.com/file2.txt" {
-		t.Errorf("expected second URL 'http://example.com/file2.txt', got %s", cfg.Files[1].URL)
-	}
-
-	if cfg.Files[2].URL != "http://example.com/file3.txt" {
-		t.Errorf("expected third URL 'http://example.com/file3.txt', got %s", cfg.Files[2].URL)
-	}
-}
-
-func TestLoadMultiple_EmptyPathList(t *testing.T) {
-	_, err := LoadMultiple([]string{})
-	if err == nil {
-		t.Error("expected error for empty path list")
-	}
-
-	if !strings.Contains(err.Error(), "no config files specified") {
-		t.Errorf("expected error message to contain 'no config files specified', got: %v", err)
-	}
-}
-
-func TestLoadMultiple_NonExistentFile(t *testing.T) {
-	_, err := LoadMultiple([]string{"/nonexistent/config.yaml"})
-	if err == nil {
-		t.Error("expected error for non-existent file")
-	}
-
-	if !strings.Contains(err.Error(), "reading config file") {
-		t.Errorf("expected error message to contain 'reading config file', got: %v", err)
-	}
-}
-
-func TestLoadMultiple_InvalidYAML(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	configPath := filepath.Join(tmpDir, "invalid.yaml")
-	err := os.WriteFile(configPath, []byte("invalid: yaml: content: ["), 0644)
-	if err != nil {
-		t.Fatalf("failed to write invalid config: %v", err)
-	}
-
-	_, err = LoadMultiple([]string{configPath})
-	if err == nil {
-		t.Error("expected error for invalid YAML")
-	}
-
-	if !strings.Contains(err.Error(), "parsing config file") {
-		t.Errorf("expected error message to contain 'parsing config file', got: %v", err)
-	}
-}
-
-func TestLoadMultiple_ValidationError(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Config with cache enabled but no alias.
-	configPath := filepath.Join(tmpDir, "config.yaml")
-	configContent := `
-cache:
-  enabled: true
-
-files:
-  - url: http://example.com/file1.txt
-    dest: /tmp/file1.txt
-    sha256: abc123
-`
-	err := os.WriteFile(configPath, []byte(configContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write config: %v", err)
-	}
-
-	_, err = LoadMultiple([]string{configPath})
-	if err == nil {
-		t.Error("expected validation error")
-	}
-
-	if !strings.Contains(err.Error(), "validating merged config") {
-		t.Errorf("expected error message to contain 'validating merged config', got: %v", err)
-	}
-}
-
-func TestLoadMultiple_Defaults(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Config with no settings specified.
-	configPath := filepath.Join(tmpDir, "config.yaml")
-	configContent := `
+				if cfg.Files[2].URL != "http://example.com/file3.txt" {
+					t.Errorf("expected third URL 'http://example.com/file3.txt', got %s", cfg.Files[2].URL)
+				}
+			},
+		},
+		{
+			name: "defaults applied",
+			configs: []string{`
 aliases:
   test-alias:
     endpoint: http://localhost:9000
@@ -781,28 +540,76 @@ files:
   - url: http://example.com/file1.txt
     dest: /tmp/file1.txt
     sha256: abc123
-`
-	err := os.WriteFile(configPath, []byte(configContent), 0644)
-	if err != nil {
-		t.Fatalf("failed to write config: %v", err)
+`},
+			validate: func(t *testing.T, cfg *Config) {
+				if cfg.Settings.Parallel != defaultParallel {
+					t.Errorf("expected parallel %d, got %d", defaultParallel, cfg.Settings.Parallel)
+				}
+
+				if cfg.Settings.Retries != defaultRetries {
+					t.Errorf("expected retries %d, got %d", defaultRetries, cfg.Settings.Retries)
+				}
+
+				if cfg.Settings.RetryDelay != defaultRetryDelay {
+					t.Errorf("expected retry_delay %v, got %v", defaultRetryDelay, cfg.Settings.RetryDelay)
+				}
+			},
+		},
+		{
+			name:      "empty config list",
+			configs:   []string{},
+			wantErr:   true,
+			errSubstr: "no configs specified",
+		},
+		{
+			name:      "invalid yaml",
+			configs:   []string{"invalid: yaml: content: ["},
+			wantErr:   true,
+			errSubstr: "parsing config",
+		},
+		{
+			name: "validation error - cache enabled without alias",
+			configs: []string{`
+cache:
+  enabled: true
+
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`},
+			wantErr:   true,
+			errSubstr: "validating merged config",
+		},
 	}
 
-	cfg, err := LoadMultiple([]string{configPath})
-	if err != nil {
-		t.Fatalf("LoadMultiple failed: %v", err)
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			configBytes := make([][]byte, len(tt.configs))
+			for i, c := range tt.configs {
+				configBytes[i] = []byte(c)
+			}
 
-	// Verify defaults were applied.
-	if cfg.Settings.Parallel != defaultParallel {
-		t.Errorf("expected parallel %d, got %d", defaultParallel, cfg.Settings.Parallel)
-	}
+			cfg, err := ParseMultiple(configBytes)
 
-	if cfg.Settings.Retries != defaultRetries {
-		t.Errorf("expected retries %d, got %d", defaultRetries, cfg.Settings.Retries)
-	}
+			if tt.wantErr {
+				if err == nil {
+					t.Error("expected error but got none")
+				} else if tt.errSubstr != "" && !strings.Contains(err.Error(), tt.errSubstr) {
+					t.Errorf("expected error containing %q, got: %v", tt.errSubstr, err)
+				}
 
-	if cfg.Settings.RetryDelay != defaultRetryDelay {
-		t.Errorf("expected retry_delay %v, got %v", defaultRetryDelay, cfg.Settings.RetryDelay)
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if tt.validate != nil {
+				tt.validate(t, cfg)
+			}
+		})
 	}
 }
 
@@ -858,7 +665,6 @@ func TestMergeConfigs_EmptyOverride(t *testing.T) {
 
 	mergeConfigs(base, override)
 
-	// Verify base config unchanged.
 	if len(base.Aliases) != 1 {
 		t.Errorf("expected 1 alias, got %d", len(base.Aliases))
 	}
