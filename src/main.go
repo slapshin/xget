@@ -10,6 +10,12 @@ import (
 	"xget/src/config"
 )
 
+var (
+	version = "dev"
+	commit  = "unknown"
+	date    = "unknown"
+)
+
 func main() {
 	os.Exit(run())
 }
@@ -17,8 +23,15 @@ func main() {
 func run() int {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <config.yaml> [<config2.yaml> ...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "       %s -version\n", os.Args[0])
 
 		return 1
+	}
+
+	if os.Args[1] == "-version" || os.Args[1] == "--version" {
+		fmt.Printf("xget version %s (commit: %s, built: %s)\n", version, commit, date)
+
+		return 0
 	}
 
 	configPaths := os.Args[1:]
