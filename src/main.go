@@ -16,21 +16,25 @@ func main() {
 
 func run() int {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <config.yaml>\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s <config.yaml> [<config2.yaml> ...]\n", os.Args[0])
 
 		return 1
 	}
 
-	configPath := os.Args[1]
+	configPaths := os.Args[1:]
 
-	cfg, err := config.Load(configPath)
+	cfg, err := config.LoadMultiple(configPaths)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 
 		return 1
 	}
 
-	fmt.Printf("Loaded config with %d files to download\n", len(cfg.Files))
+	if len(configPaths) > 1 {
+		fmt.Printf("Loaded %d config files with %d files to download\n", len(configPaths), len(cfg.Files))
+	} else {
+		fmt.Printf("Loaded config with %d files to download\n", len(cfg.Files))
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
