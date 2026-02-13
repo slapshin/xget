@@ -41,7 +41,7 @@ The application uses YAML config files (see `config.yaml.template` for full exam
 - **settings**: Download behavior (parallel, retries, retry_delay)
 - **files**: List of files to download with URLs, destinations, and SHA256 checksums
 
-Config supports environment variable expansion using `${VAR_NAME}` syntax.
+Config supports environment variable expansion using `${VAR_NAME}` syntax in alias credentials and file destination paths.
 
 ## Architecture
 
@@ -79,7 +79,7 @@ S3-based caching using SHA256 hash as the key:
 
 - **types.go**: Config structure definitions
 - **config.go**: YAML parsing, validation, defaults
-- **env.go**: Environment variable expansion in alias credentials
+- **env.go**: Environment variable expansion in alias credentials and file destination paths
 
 ### Partial Download Support
 

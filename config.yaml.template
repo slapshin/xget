@@ -49,3 +49,8 @@ files:
   - url: https://example.com/file3.bin
     dest: ./downloads/file3.bin
     sha256: ghi789...
+
+  # Environment variable expansion in dest path
+  - url: https://example.com/file4.bin
+    dest: ${DOWNLOAD_DIR}/file4.bin
+    sha256: jkl012...

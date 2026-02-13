@@ -34,6 +34,11 @@ func Load(path string) (*Config, error) {
 		cfg.Aliases[name] = alias
 	}
 
+	// Expand environment variables in file entries.
+	for i := range cfg.Files {
+		expandFileEntryEnvVars(&cfg.Files[i])
+	}
+
 	// Apply defaults.
 	applyDefaults(&cfg)
 
@@ -139,6 +144,11 @@ func parseWithoutValidation(data []byte) (*Config, error) {
 	for name, alias := range cfg.Aliases {
 		expandAliasEnvVars(&alias)
 		cfg.Aliases[name] = alias
+	}
+
+	// Expand environment variables in file entries.
+	for i := range cfg.Files {
+		expandFileEntryEnvVars(&cfg.Files[i])
 	}
 
 	return &cfg, nil

@@ -138,13 +138,18 @@ files:
 
 ### Environment Variables
 
-The configuration supports environment variable expansion using `${VAR_NAME}` syntax:
+The configuration supports environment variable expansion using `${VAR_NAME}` syntax in alias credentials and file destination paths:
 
 ```yaml
 aliases:
   minio:
     access_key: ${MINIO_ACCESS_KEY}
     secret_key: ${MINIO_SECRET_KEY}
+
+files:
+  - url: https://example.com/file.tar.gz
+    dest: ${DOWNLOAD_DIR}/file.tar.gz
+    sha256: abc123...
 ```
 
 You can also omit `access_key` and `secret_key` fields to use standard AWS environment variables:

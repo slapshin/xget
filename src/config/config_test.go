@@ -681,3 +681,66 @@ func TestMergeConfigs_EmptyOverride(t *testing.T) {
 		t.Errorf("expected 1 file, got %d", len(base.Files))
 	}
 }
+
+func TestFileEntryEnvVarExpansion(t *testing.T) {
+	t.Setenv("DOWNLOAD_DIR", "/custom/downloads")
+	t.Setenv("FILE_PREFIX", "output")
+
+	cfg, err := parseConfigs(t, []string{`
+aliases:
+  test-alias:
+    endpoint: http://localhost:9000
+    region: us-east-1
+    bucket: test-bucket
+    access_key: key
+    secret_key: secret
+
+files:
+  - url: http://example.com/file1.txt
+    dest: ${DOWNLOAD_DIR}/file1.txt
+    sha256: abc123
+  - url: http://example.com/file2.txt
+    dest: ${DOWNLOAD_DIR}/${FILE_PREFIX}_file2.txt
+    sha256: def456
+  - url: http://example.com/file3.txt
+    dest: /tmp/file3.txt
+    sha256: ghi789
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.Files) != 3 {
+		t.Errorf("expected 3 files, got %d", len(cfg.Files))
+	}
+
+	assertFileEntry(t, cfg.Files[0], "http://example.com/file1.txt", "/custom/downloads/file1.txt", "abc123")
+	assertFileEntry(t, cfg.Files[1], "http://example.com/file2.txt", "/custom/downloads/output_file2.txt", "def456")
+	assertFileEntry(t, cfg.Files[2], "http://example.com/file3.txt", "/tmp/file3.txt", "ghi789")
+}
+
+func TestFileEntryEnvVarNotExpanded(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{`
+aliases:
+  test-alias:
+    endpoint: http://localhost:9000
+    region: us-east-1
+    bucket: test-bucket
+    access_key: key
+    secret_key: secret
+
+files:
+  - url: http://example.com/file1.txt
+    dest: ${NONEXISTENT_VAR}/file1.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(cfg.Files) != 1 {
+		t.Errorf("expected 1 file, got %d", len(cfg.Files))
+	}
+
+	assertFileEntry(t, cfg.Files[0], "http://example.com/file1.txt", "${NONEXISTENT_VAR}/file1.txt", "abc123")
+}
