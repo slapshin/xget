@@ -14,4 +14,14 @@
       "file": ".claude/rules/commit-messages.md"
     }
   ],
+  "github.copilot.chat.reviewSelection.instructions": [
+    {
+      "file": ".claude/rules/go-codestyle.md"
+    }
+  ],
+  // "github.copilot.chat.testGeneration.instructions": [
+  //   {
+  //     "file": ".claude/rules/test-generation.md"
+  //   }
+  // ]
 }
