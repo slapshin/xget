@@ -3,12 +3,6 @@
   "go.lintFlags": [
     "--fast"
   ],
-  "go.testEnvVars": {
-    "GOEXPERIMENT": "synctest"
-  },
-  "go.toolsEnvVars": {
-    "GOEXPERIMENT": "synctest"
-  },
   "github.copilot.chat.commitMessageGeneration.instructions": [
     {
       "file": ".claude/rules/commit-messages.md"

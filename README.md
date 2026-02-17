@@ -63,7 +63,7 @@ docker run -v $(pwd)/config.yaml:/config.yaml xget /config.yaml
 
 ### Requirements
 
-- Go 1.25.5 or higher
+- Go 1.26.0 or higher
 
 ## Usage
 
