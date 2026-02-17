@@ -23,9 +23,14 @@ func main() {
 func run() int {
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <config.yaml> [<config2.yaml> ...]\n", os.Args[0])
+		fmt.Fprintf(os.Stderr, "       %s generate <directory> [-o output.yaml]\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "       %s -version\n", os.Args[0])
 
 		return 1
+	}
+
+	if os.Args[1] == "generate" {
+		return runGenerate()
 	}
 
 	if os.Args[1] == "-version" || os.Args[1] == "--version" {
@@ -93,4 +98,57 @@ func reportResults(results []DownloadResult) int {
 	}
 
 	return failed
+}
+
+func runGenerate() int {
+	args := os.Args[2:]
+
+	var outputFile string
+
+	i := 0
+	for i < len(args) {
+		if args[i] == "-o" {
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "error: -o flag requires an argument\n")
+
+				return 1
+			}
+
+			outputFile = args[i+1]
+			args = append(args[:i], args[i+2:]...)
+		} else {
+			i++
+		}
+	}
+
+	if len(args) != 1 {
+		fmt.Fprintf(os.Stderr, "error: generate command requires exactly one directory argument\n")
+		fmt.Fprintf(os.Stderr, "Usage: %s generate <directory> [-o output.yaml]\n", os.Args[0])
+
+		return 1
+	}
+
+	dirPath := args[0]
+
+	data, err := generateConfig(dirPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error generating config: %v\n", err)
+
+		return 1
+	}
+
+	if outputFile != "" {
+		err = os.WriteFile(outputFile, data, 0o600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error writing output file: %v\n", err)
+
+			return 1
+		}
+
+		fmt.Printf("generated config written to %s\n", outputFile)
+	} else {
+		fmt.Print(string(data))
+	}
+
+	return 0
 }

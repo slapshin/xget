@@ -12,5 +12,19 @@
         "tmp/config.yaml"
       ]
     },
+    {
+      "name": "generate",
+      "type": "go",
+      "request": "launch",
+      "mode": "auto",
+      "program": "${workspaceFolder}/src",
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "generate",
+        "-o",
+        "tmp/generated.yaml",
+        "tmp"
+      ]
+    },
   ]
 }
