@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io"
 	"time"
 
 	"github.com/vbauerster/mpb/v8"
@@ -10,8 +9,9 @@ import (
 
 // ProgressWriter wraps a writer with a progress bar backed by an mpb container.
 type ProgressWriter struct {
-	bar    *mpb.Bar
-	writer io.Writer
+	bar      *mpb.Bar
+	lastTime time.Time
+	started  bool
 }
 
 // NewProgressWriter adds a new progress bar to the given mpb container and returns
@@ -31,20 +31,32 @@ func NewProgressWriter(container *mpb.Progress, total int64, description string)
 	)
 
 	return &ProgressWriter{
-		bar:    bar,
-		writer: io.Discard,
+		bar: bar,
 	}
 }
 
-// Write implements io.Writer and updates the progress bar with accurate timing for speed calculation.
+// Write implements io.Writer and updates the progress bar.
+// Elapsed time is measured between successive Write calls, which reflects
+// the real network read rate from the upstream io.Copy.
+// The first call initialises the clock to avoid counting connection setup time.
 func (progressWriter *ProgressWriter) Write(data []byte) (int, error) {
-	start := time.Now()
+	now := time.Now()
 
-	n, err := progressWriter.writer.Write(data)
+	if !progressWriter.started {
+		progressWriter.started = true
+		progressWriter.lastTime = now
 
-	progressWriter.bar.EwmaIncrBy(n, time.Since(start))
+		progressWriter.bar.EwmaIncrBy(len(data), time.Millisecond)
 
-	return n, err
+		return len(data), nil
+	}
+
+	elapsed := now.Sub(progressWriter.lastTime)
+	progressWriter.lastTime = now
+
+	progressWriter.bar.EwmaIncrBy(len(data), elapsed)
+
+	return len(data), nil
 }
 
 // SetCurrent sets the current progress value (useful for resume).
