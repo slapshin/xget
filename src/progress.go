@@ -2,6 +2,7 @@ package main
 
 import (
 	"io"
+	"time"
 
 	"github.com/vbauerster/mpb/v8"
 	"github.com/vbauerster/mpb/v8/decor"
@@ -24,18 +25,26 @@ func NewProgressWriter(container *mpb.Progress, total int64, description string)
 			decor.CountersKibiByte("% .2f / % .2f"),
 			decor.Name(" "),
 			decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 30),
+			decor.Name(" ETA:"),
+			decor.EwmaETA(decor.ET_STYLE_GO, 30),
 		),
 	)
 
 	return &ProgressWriter{
 		bar:    bar,
-		writer: bar.ProxyWriter(io.Discard),
+		writer: io.Discard,
 	}
 }
 
-// Write implements io.Writer and updates the progress bar.
+// Write implements io.Writer and updates the progress bar with accurate timing for speed calculation.
 func (progressWriter *ProgressWriter) Write(data []byte) (int, error) {
-	return progressWriter.writer.Write(data)
+	start := time.Now()
+
+	n, err := progressWriter.writer.Write(data)
+
+	progressWriter.bar.EwmaIncrBy(n, time.Since(start))
+
+	return n, err
 }
 
 // SetCurrent sets the current progress value (useful for resume).
