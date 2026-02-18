@@ -21,6 +21,8 @@ func main() {
 }
 
 func run() int {
+	fmt.Printf("xget %s (commit: %s, built: %s)\n", version, commit, date)
+
 	if len(os.Args) < 2 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <config.yaml> [<config2.yaml> ...]\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "       %s generate <directory> [-o output.yaml]\n", os.Args[0])

@@ -51,7 +51,12 @@ jobs:
           if [ "${{ matrix.goos }}" = "windows" ]; then
             OUTPUT_NAME="${OUTPUT_NAME}.exe"
           fi
-          go build -v -ldflags="-s -w" -o "dist/${OUTPUT_NAME}" xget/src
+          VERSION="${{ github.ref_name }}"
+          COMMIT="${{ github.sha }}"
+          DATE="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+          go build -v \
+            -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}" \
+            -o "dist/${OUTPUT_NAME}" xget/src
 
           echo "ASSET=${OUTPUT_NAME}" >> $GITHUB_ENV
 
