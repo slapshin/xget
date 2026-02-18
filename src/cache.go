@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"xget/src/config"
 	"xget/src/storage"
@@ -51,6 +52,12 @@ func (cache *Cache) Get(ctx context.Context, sha256Hash, destPath string) (bool,
 	}
 
 	defer reader.Close()
+
+	// Ensure destination directory exists.
+	err = os.MkdirAll(filepath.Dir(destPath), 0o755)
+	if err != nil {
+		return false, fmt.Errorf("creating destination directory: %w", err)
+	}
 
 	// Create destination file.
 	file, err := os.Create(destPath)
