@@ -6,6 +6,9 @@ LDFLAGS = -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DAT
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/xget xget/src
 
+test:
+	go test ./...
+
 lint:
 	golangci-lint --timeout=5m run
 
