@@ -102,7 +102,7 @@ func (downloader *Downloader) downloadFile(ctx context.Context, file config.File
 	}
 
 	// Try to get from cache first.
-	cached := downloader.tryGetFromCache(ctx, file)
+	cached := downloader.tryGetFromCache(ctx, file, progress)
 	if cached {
 		return nil
 	}
@@ -111,25 +111,19 @@ func (downloader *Downloader) downloadFile(ctx context.Context, file config.File
 	return downloader.downloadWithRetry(ctx, file, progress)
 }
 
-func (downloader *Downloader) tryGetFromCache(ctx context.Context, file config.FileEntry) bool {
+func (downloader *Downloader) tryGetFromCache(ctx context.Context, file config.FileEntry, progress *mpb.Progress) bool {
 	if downloader.cache == nil {
 		return false
 	}
 
-	cached, err := downloader.cache.Get(ctx, file.SHA256, file.Dest)
+	cached, err := downloader.cache.Get(ctx, file.SHA256, file.Dest, progress)
 	if err != nil {
 		fmt.Printf("cache check error for %s: %v\n", file.Dest, err)
 
 		return false
 	}
 
-	if cached {
-		fmt.Printf("downloaded %s from cache\n", file.Dest)
-
-		return true
-	}
-
-	return false
+	return cached
 }
 
 func (downloader *Downloader) downloadWithRetry(

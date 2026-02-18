@@ -9,6 +9,8 @@ import (
 
 	"xget/src/config"
 	"xget/src/storage"
+
+	"github.com/vbauerster/mpb/v8"
 )
 
 // Cache provides caching functionality using S3 storage.
@@ -29,7 +31,7 @@ func NewCache(cfg *config.Config) *Cache {
 
 // Get retrieves a file from cache by its SHA256 hash.
 // Returns true if file was found in cache and downloaded successfully.
-func (cache *Cache) Get(ctx context.Context, sha256Hash, destPath string) (bool, error) {
+func (cache *Cache) Get(ctx context.Context, sha256Hash, destPath string, progress *mpb.Progress) (bool, error) {
 	source, err := storage.NewS3SourceFromAlias(ctx, cache.alias, sha256Hash)
 	if err != nil {
 		return false, fmt.Errorf("creating S3 source: %w", err)
@@ -46,7 +48,7 @@ func (cache *Cache) Get(ctx context.Context, sha256Hash, destPath string) (bool,
 	}
 
 	// Download from cache.
-	reader, _, err := source.Download(ctx, 0)
+	reader, totalSize, err := source.Download(ctx, 0)
 	if err != nil {
 		return false, fmt.Errorf("downloading from cache: %w", err)
 	}
@@ -67,13 +69,17 @@ func (cache *Cache) Get(ctx context.Context, sha256Hash, destPath string) (bool,
 
 	defer file.Close()
 
+	progressWriter := NewProgressWriter(progress, totalSize, "[cache] "+destPath)
+
 	// Copy content.
-	_, err = io.Copy(file, reader)
+	_, err = io.Copy(io.MultiWriter(file, progressWriter), reader)
 	if err != nil {
 		os.Remove(destPath)
 
 		return false, fmt.Errorf("writing file: %w", err)
 	}
+
+	progressWriter.Finish()
 
 	// Verify checksum.
 	valid, err := VerifyFileSHA256(destPath, sha256Hash)
