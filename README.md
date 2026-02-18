@@ -67,6 +67,8 @@ docker run -v $(pwd)/config.yaml:/config.yaml xget /config.yaml
 
 ## Usage
 
+### Download Files
+
 ```bash
 xget <config.yaml>
 ```
@@ -77,6 +79,73 @@ The tool takes a single argument - the path to a YAML configuration file that de
 - Cache configuration
 - Download settings
 - List of files to download
+
+### Generate Config from Directory
+
+The `generate` command helps create configuration files by scanning an existing directory and computing SHA256 hashes for all files:
+
+```bash
+# Output to stdout
+xget generate <directory>
+
+# Write to file
+xget generate <directory> -o output.yaml
+```
+
+**Example usage:**
+
+```bash
+# Scan downloads directory and generate config
+xget generate ./downloads -o generated.yaml
+
+# Preview generated config
+xget generate ./myfiles
+```
+
+**Generated output format:**
+
+```yaml
+files:
+- url: ""
+  dest: file1.tar.gz
+  sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+- url: ""
+  dest: subdir/file2.bin
+  sha256: a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890
+```
+
+The generate command:
+
+- Recursively walks the directory tree
+- Computes SHA256 hash for each regular file
+- Uses relative paths from the base directory
+- Outputs YAML with empty `url` fields (to be filled in manually)
+- Preserves directory structure in file paths
+- Skips directories, symlinks, and special files
+- Prints warnings to stderr for inaccessible files
+
+**Use cases:**
+
+1. **Verify existing downloads** - Generate checksums to verify files downloaded outside xget
+2. **Create download manifests** - Document file checksums before distribution
+3. **Populate config templates** - Generate file entries and add URLs later
+
+After generation, edit the config to add:
+
+- URLs for each file
+- Storage aliases (if using S3)
+- Cache configuration
+- Download settings (parallel, retries, etc.)
+
+### Version Information
+
+```bash
+xget -version
+# or
+xget --version
+```
+
+Displays version, commit hash, and build timestamp.
 
 ## Configuration
 
@@ -268,6 +337,49 @@ EOF
 ./bin/xget config.yaml
 ```
 
+### Generate Config from Existing Files
+
+Workflow for creating a download manifest from existing files:
+
+```bash
+# Step 1: Generate checksums from existing directory
+xget generate ./my-downloads -o manifest.yaml
+
+# Step 2: Edit generated file to add URLs and other config
+cat manifest.yaml
+```
+
+Output:
+
+```yaml
+files:
+- url: ""
+  dest: app-v1.0.0.tar.gz
+  sha256: a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890
+- url: ""
+  dest: tools/helper.bin
+  sha256: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+```
+
+```bash
+# Step 3: Add URLs and complete the configuration
+cat > config.yaml <<EOF
+settings:
+  parallel: 3
+
+files:
+  - url: https://releases.example.com/app-v1.0.0.tar.gz
+    dest: app-v1.0.0.tar.gz
+    sha256: a1b2c3d4e5f67890abcdef1234567890abcdef1234567890abcdef1234567890
+  - url: https://cdn.example.com/tools/helper.bin
+    dest: tools/helper.bin
+    sha256: fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210
+EOF
+
+# Step 4: Use the config to download (or verify existing files)
+xget config.yaml
+```
+
 ## Development
 
 ### Building
@@ -286,7 +398,7 @@ make go-tidy
 
 ### Project Structure
 
-```
+```text
 xget/
 ├── src/
 │   ├── main.go              # Application entry point
@@ -342,7 +454,7 @@ Types: feat, fix, refactor, perf, test, docs, build, ci, chore
 
 Examples:
 
-```
+```text
 feat: add retry mechanism for failed downloads
 fix: handle nil pointer in download manager
 refactor: simplify error handling in S3 source
