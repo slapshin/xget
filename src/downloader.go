@@ -200,7 +200,7 @@ func (downloader *Downloader) downloadFromSource(
 	file config.FileEntry,
 	progress *mpb.Progress,
 ) error {
-	source, err := storage.NewSource(file.URL, downloader.cfg.Aliases)
+	source, err := storage.NewSource(file.URL, downloader.cfg.Aliases, downloader.cfg.Settings.Timeout)
 	if err != nil {
 		return fmt.Errorf("creating source: %w", err)
 	}

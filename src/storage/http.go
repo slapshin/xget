@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // HTTPSource implements Source for HTTP/HTTPS URLs.
@@ -14,10 +15,10 @@ type HTTPSource struct {
 	client *http.Client
 }
 
-func newHTTPSource(url string) *HTTPSource {
+func newHTTPSource(url string, timeout time.Duration) *HTTPSource {
 	return &HTTPSource{
 		url:    url,
-		client: &http.Client{},
+		client: &http.Client{Timeout: timeout},
 	}
 }
 

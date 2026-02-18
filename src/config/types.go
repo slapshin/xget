@@ -31,6 +31,7 @@ type Settings struct {
 	Parallel   int           `yaml:"parallel"`
 	Retries    int           `yaml:"retries"`
 	RetryDelay time.Duration `yaml:"retry_delay"`
+	Timeout    time.Duration `yaml:"timeout"`
 }
 
 // FileEntry represents a file to download.

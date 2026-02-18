@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"xget/src/config"
 )
@@ -20,12 +21,12 @@ type Source interface {
 }
 
 // NewSource creates a Source based on the URL scheme.
-func NewSource(url string, aliases map[string]config.Alias) (Source, error) {
+func NewSource(url string, aliases map[string]config.Alias, timeout time.Duration) (Source, error) {
 	switch {
 	case strings.HasPrefix(url, "s3://"):
 		return newS3Source(url, aliases)
 	case strings.HasPrefix(url, "http://"), strings.HasPrefix(url, "https://"):
-		return newHTTPSource(url), nil
+		return newHTTPSource(url, timeout), nil
 	default:
 		return nil, fmt.Errorf("unsupported URL scheme: %s", url)
 	}

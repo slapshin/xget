@@ -12,6 +12,7 @@ const (
 	defaultParallel   = 4
 	defaultRetries    = 3
 	defaultRetryDelay = 5 * time.Second
+	defaultTimeout    = 10 * time.Minute
 )
 
 // Load reads and parses a YAML config file.
@@ -186,6 +187,10 @@ func mergeConfigs(base *Config, override *Config) {
 		base.Settings.RetryDelay = override.Settings.RetryDelay
 	}
 
+	if override.Settings.Timeout > 0 {
+		base.Settings.Timeout = override.Settings.Timeout
+	}
+
 	// Accumulate files.
 	base.Files = append(base.Files, override.Files...)
 }
@@ -201,6 +206,10 @@ func applyDefaults(cfg *Config) {
 
 	if cfg.Settings.RetryDelay <= 0 {
 		cfg.Settings.RetryDelay = defaultRetryDelay
+	}
+
+	if cfg.Settings.Timeout <= 0 {
+		cfg.Settings.Timeout = defaultTimeout
 	}
 }
 
