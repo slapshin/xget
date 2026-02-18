@@ -6,10 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
-	"time"
 )
-
-const httpTimeout = 30 * time.Second
 
 // HTTPSource implements Source for HTTP/HTTPS URLs.
 type HTTPSource struct {
@@ -19,10 +16,8 @@ type HTTPSource struct {
 
 func newHTTPSource(url string) *HTTPSource {
 	return &HTTPSource{
-		url: url,
-		client: &http.Client{
-			Timeout: httpTimeout,
-		},
+		url:    url,
+		client: &http.Client{},
 	}
 }
 
