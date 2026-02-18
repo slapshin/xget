@@ -719,6 +719,107 @@ files:
 	assertFileEntry(t, cfg.Files[2], "http://example.com/file3.txt", "/tmp/file3.txt", "ghi789")
 }
 
+func TestAliasNoSignRequestEnvVarExpansion(t *testing.T) {
+	t.Setenv("NO_SIGN", "true")
+
+	cfg, err := parseConfigs(t, []string{`
+aliases:
+  signed:
+    endpoint: http://localhost:9000
+    region: us-east-1
+    bucket: test-bucket
+    access_key: key
+    secret_key: secret
+    no_sign_request: "false"
+  unsigned:
+    endpoint: http://localhost:9000
+    region: us-east-1
+    bucket: test-bucket
+    no_sign_request: ${NO_SIGN}
+
+files:
+  - url: s3://unsigned/file.txt
+    dest: /tmp/file.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	signed, ok := cfg.Aliases["signed"]
+	if !ok {
+		t.Fatal("expected 'signed' alias")
+	}
+
+	if signed.IsNoSignRequest() {
+		t.Error("expected signed alias to have no_sign_request=false")
+	}
+
+	unsigned, ok := cfg.Aliases["unsigned"]
+	if !ok {
+		t.Fatal("expected 'unsigned' alias")
+	}
+
+	if !unsigned.IsNoSignRequest() {
+		t.Error("expected unsigned alias to have no_sign_request=true via env var")
+	}
+}
+
+func TestAliasNoSignRequestLiteralValues(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{`
+aliases:
+  by-true:
+    endpoint: http://localhost:9000
+    bucket: b
+    no_sign_request: "true"
+  by-one:
+    endpoint: http://localhost:9000
+    bucket: b
+    no_sign_request: "1"
+  by-yes:
+    endpoint: http://localhost:9000
+    bucket: b
+    no_sign_request: "yes"
+  by-false:
+    endpoint: http://localhost:9000
+    bucket: b
+    no_sign_request: "false"
+  by-empty:
+    endpoint: http://localhost:9000
+    bucket: b
+
+files:
+  - url: s3://by-true/file.txt
+    dest: /tmp/file.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		expected bool
+	}{
+		{"by-true", true},
+		{"by-one", true},
+		{"by-yes", true},
+		{"by-false", false},
+		{"by-empty", false},
+	}
+
+	for _, tc := range cases {
+		alias, ok := cfg.Aliases[tc.name]
+		if !ok {
+			t.Fatalf("expected alias %q", tc.name)
+		}
+
+		if alias.IsNoSignRequest() != tc.expected {
+			t.Errorf("alias %q: expected IsNoSignRequest()=%v, got %v", tc.name, tc.expected, alias.IsNoSignRequest())
+		}
+	}
+}
+
 func TestFileEntryEnvVarNotExpanded(t *testing.T) {
 	cfg, err := parseConfigs(t, []string{`
 aliases:

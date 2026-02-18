@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Config represents the root configuration structure.
 type Config struct {
@@ -18,7 +21,15 @@ type Alias struct {
 	Prefix        string `yaml:"prefix"`
 	AccessKey     string `yaml:"access_key"`
 	SecretKey     string `yaml:"secret_key"`
-	NoSignRequest bool   `yaml:"no_sign_request"`
+	NoSignRequest string `yaml:"no_sign_request"`
+}
+
+// IsNoSignRequest returns true if no_sign_request is enabled.
+// Accepts "true", "1", "yes" (case-insensitive) as truthy values.
+func (alias Alias) IsNoSignRequest() bool {
+	v := strings.ToLower(strings.TrimSpace(alias.NoSignRequest))
+
+	return v == "true" || v == "1" || v == "yes"
 }
 
 // CacheConfig represents the cache configuration.

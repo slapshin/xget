@@ -91,7 +91,7 @@ func createS3Client(ctx context.Context, alias config.Alias) (*s3.Client, error)
 		opts = append(opts, awsconfig.WithRegion(alias.Region))
 	}
 
-	if alias.NoSignRequest {
+	if alias.IsNoSignRequest() {
 		opts = append(opts, awsconfig.WithCredentialsProvider(aws.AnonymousCredentials{}))
 	} else if alias.AccessKey != "" && alias.SecretKey != "" {
 		opts = append(opts, awsconfig.WithCredentialsProvider(

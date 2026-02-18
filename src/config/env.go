@@ -31,6 +31,7 @@ func expandAliasEnvVars(alias *Alias) {
 	alias.Prefix = expandEnvVars(alias.Prefix)
 	alias.AccessKey = expandEnvVars(alias.AccessKey)
 	alias.SecretKey = expandEnvVars(alias.SecretKey)
+	alias.NoSignRequest = expandEnvVars(alias.NoSignRequest)
 }
 
 // expandFileEntryEnvVars expands environment variables in file entry fields.
