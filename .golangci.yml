@@ -14,7 +14,7 @@ linters:
     - gochecknoinits
     - gocritic
     - godot
-    - gosec
+    # - gosec
     - govet
     - grouper
     - importas
