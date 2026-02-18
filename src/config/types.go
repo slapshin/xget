@@ -12,12 +12,13 @@ type Config struct {
 
 // Alias represents an S3 storage backend configuration.
 type Alias struct {
-	Endpoint  string `yaml:"endpoint"`
-	Region    string `yaml:"region"`
-	Bucket    string `yaml:"bucket"`
-	Prefix    string `yaml:"prefix"`
-	AccessKey string `yaml:"access_key"`
-	SecretKey string `yaml:"secret_key"`
+	Endpoint      string `yaml:"endpoint"`
+	Region        string `yaml:"region"`
+	Bucket        string `yaml:"bucket"`
+	Prefix        string `yaml:"prefix"`
+	AccessKey     string `yaml:"access_key"`
+	SecretKey     string `yaml:"secret_key"`
+	NoSignRequest bool   `yaml:"no_sign_request"`
 }
 
 // CacheConfig represents the cache configuration.
