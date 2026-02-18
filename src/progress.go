@@ -3,60 +3,47 @@ package main
 import (
 	"io"
 
-	"github.com/schollz/progressbar/v3"
+	"github.com/vbauerster/mpb/v8"
+	"github.com/vbauerster/mpb/v8/decor"
 )
 
-// ProgressWriter wraps a writer with a progress bar.
+// ProgressWriter wraps a writer with a progress bar backed by an mpb container.
 type ProgressWriter struct {
+	bar    *mpb.Bar
 	writer io.Writer
-	bar    *progressbar.ProgressBar
 }
 
-// NewProgressWriter creates a new progress writer with a progress bar.
-func NewProgressWriter(w io.Writer, total int64, description string) *ProgressWriter {
-	bar := progressbar.NewOptions64(
-		total,
-		progressbar.OptionSetDescription(description),
-		progressbar.OptionShowBytes(true),
-		progressbar.OptionSetWidth(40),
-		progressbar.OptionShowCount(),
-		progressbar.OptionOnCompletion(func() {
-			// Print newline after completion.
-			_, _ = io.WriteString(w, "\n")
-		}),
-		progressbar.OptionSetTheme(progressbar.Theme{
-			Saucer:        "=",
-			SaucerHead:    ">",
-			SaucerPadding: " ",
-			BarStart:      "[",
-			BarEnd:        "]",
-		}),
+// NewProgressWriter adds a new progress bar to the given mpb container and returns
+// a ProgressWriter that updates it as data is written.
+func NewProgressWriter(container *mpb.Progress, total int64, description string) *ProgressWriter {
+	bar := container.AddBar(total,
+		mpb.PrependDecorators(
+			decor.Name(description, decor.WC{C: decor.DindentRight | decor.DextraSpace}),
+		),
+		mpb.AppendDecorators(
+			decor.CountersKibiByte("% .2f / % .2f"),
+			decor.Name(" "),
+			decor.EwmaSpeed(decor.SizeB1024(0), "% .2f", 30),
+		),
 	)
 
 	return &ProgressWriter{
-		writer: w,
 		bar:    bar,
+		writer: bar.ProxyWriter(io.Discard),
 	}
 }
 
 // Write implements io.Writer and updates the progress bar.
 func (progressWriter *ProgressWriter) Write(data []byte) (int, error) {
-	n := len(data)
-
-	err := progressWriter.bar.Add(n)
-	if err != nil {
-		return n, err
-	}
-
-	return n, nil
+	return progressWriter.writer.Write(data)
 }
 
 // SetCurrent sets the current progress value (useful for resume).
 func (progressWriter *ProgressWriter) SetCurrent(current int64) {
-	_ = progressWriter.bar.Set64(current)
+	progressWriter.bar.SetCurrent(current)
 }
 
-// Finish completes the progress bar.
+// Finish marks the bar as complete.
 func (progressWriter *ProgressWriter) Finish() {
-	_ = progressWriter.bar.Finish()
+	progressWriter.bar.SetTotal(-1, true)
 }

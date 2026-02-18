@@ -11,6 +11,8 @@ import (
 
 	"xget/src/config"
 	"xget/src/storage"
+
+	"github.com/vbauerster/mpb/v8"
 )
 
 // DownloadResult represents the result of a single file download.
@@ -41,6 +43,8 @@ func (downloader *Downloader) Download(ctx context.Context) []DownloadResult {
 		result DownloadResult
 	}, len(downloader.cfg.Files))
 
+	progress := mpb.NewWithContext(ctx)
+
 	// Create worker pool.
 	var wg sync.WaitGroup
 
@@ -56,7 +60,7 @@ func (downloader *Downloader) Download(ctx context.Context) []DownloadResult {
 
 			defer func() { <-semaphore }()
 
-			err := downloader.downloadFile(ctx, file)
+			err := downloader.downloadFile(ctx, file, progress)
 
 			resultCh <- struct {
 				index  int
@@ -79,10 +83,12 @@ func (downloader *Downloader) Download(ctx context.Context) []DownloadResult {
 		results[r.index] = r.result
 	}
 
+	progress.Wait()
+
 	return results
 }
 
-func (downloader *Downloader) downloadFile(ctx context.Context, file config.FileEntry) error {
+func (downloader *Downloader) downloadFile(ctx context.Context, file config.FileEntry, progress *mpb.Progress) error {
 	// Check if destination file already exists with correct hash.
 	exists, err := downloader.checkExistingFile(file)
 	if err != nil {
@@ -102,7 +108,7 @@ func (downloader *Downloader) downloadFile(ctx context.Context, file config.File
 	}
 
 	// Download from source with retry.
-	return downloader.downloadWithRetry(ctx, file)
+	return downloader.downloadWithRetry(ctx, file, progress)
 }
 
 func (downloader *Downloader) tryGetFromCache(ctx context.Context, file config.FileEntry) bool {
@@ -126,7 +132,11 @@ func (downloader *Downloader) tryGetFromCache(ctx context.Context, file config.F
 	return false
 }
 
-func (downloader *Downloader) downloadWithRetry(ctx context.Context, file config.FileEntry) error {
+func (downloader *Downloader) downloadWithRetry(
+	ctx context.Context,
+	file config.FileEntry,
+	progress *mpb.Progress,
+) error {
 	var lastErr error
 
 	for attempt := 1; attempt <= downloader.cfg.Settings.Retries; attempt++ {
@@ -135,7 +145,7 @@ func (downloader *Downloader) downloadWithRetry(ctx context.Context, file config
 			time.Sleep(downloader.cfg.Settings.RetryDelay)
 		}
 
-		err := downloader.downloadFromSource(ctx, file)
+		err := downloader.downloadFromSource(ctx, file, progress)
 		if err == nil {
 			downloader.uploadToCache(ctx, file)
 
@@ -185,7 +195,11 @@ func (downloader *Downloader) checkExistingFile(file config.FileEntry) (bool, er
 	return valid, nil
 }
 
-func (downloader *Downloader) downloadFromSource(ctx context.Context, file config.FileEntry) error {
+func (downloader *Downloader) downloadFromSource(
+	ctx context.Context,
+	file config.FileEntry,
+	progress *mpb.Progress,
+) error {
 	source, err := storage.NewSource(file.URL, downloader.cfg.Aliases)
 	if err != nil {
 		return fmt.Errorf("creating source: %w", err)
@@ -205,7 +219,7 @@ func (downloader *Downloader) downloadFromSource(ctx context.Context, file confi
 
 	defer destFile.Close()
 
-	err = downloader.performDownload(ctx, source, destFile, file, offset)
+	err = downloader.performDownload(ctx, source, destFile, file, offset, progress)
 	if err != nil {
 		return err
 	}
@@ -237,6 +251,7 @@ func (downloader *Downloader) performDownload(
 	destFile *os.File,
 	file config.FileEntry,
 	offset int64,
+	progressContainer *mpb.Progress,
 ) error {
 	reader, totalSize, err := source.Download(ctx, offset)
 	if err != nil {
@@ -245,19 +260,18 @@ func (downloader *Downloader) performDownload(
 
 	defer reader.Close()
 
-	progress := NewProgressWriter(os.Stdout, totalSize, filepath.Base(file.Dest))
+	progressWriter := NewProgressWriter(progressContainer, totalSize, filepath.Base(file.Dest))
 
 	if offset > 0 {
-		progress.SetCurrent(offset)
-		fmt.Printf("resuming %s from %d bytes\n", file.Dest, offset)
+		progressWriter.SetCurrent(offset)
 	}
 
-	_, err = io.Copy(io.MultiWriter(destFile, progress), reader)
+	_, err = io.Copy(io.MultiWriter(destFile, progressWriter), reader)
 	if err != nil {
 		return fmt.Errorf("writing file: %w", err)
 	}
 
-	progress.Finish()
+	progressWriter.Finish()
 
 	if err := destFile.Close(); err != nil {
 		return fmt.Errorf("closing file: %w", err)
