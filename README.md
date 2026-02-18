@@ -334,7 +334,7 @@ The project follows strict Go coding standards. See `.claude/rules/go-codestyle.
 
 Follow conventional commit format. See `.claude/rules/commit-messages.md` for guidelines:
 
-```
+```md
 <type>: <subject>
 
 Types: feat, fix, refactor, perf, test, docs, build, ci, chore
@@ -404,6 +404,28 @@ Contributions are welcome. Please:
 2. Use conventional commit messages per `.claude/rules/commit-messages.md`
 3. Ensure all tests pass and linter is clean
 4. Add tests for new functionality
+
+## Release Process
+
+### For Maintainers
+
+Creating a new release is automated through GitHub Actions.
+
+#### Create and Push Tag
+
+Releases follow [Semantic Versioning](https://semver.org/):
+
+- **Major** (`v2.0.0`) - Breaking changes
+- **Minor** (`v1.1.0`) - New features, backward compatible
+- **Patch** (`v1.0.1`) - Bug fixes, backward compatible
+
+```bash
+# Create annotated tag
+git tag -a v0.2.0 -m "v0.2.0"
+
+# Push tag to trigger release workflow
+git push origin v0.2.0
+```
 
 ## License
 
