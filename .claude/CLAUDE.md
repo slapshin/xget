@@ -18,7 +18,10 @@ xget is a parallel file downloader with caching capabilities. It downloads files
 # Build binary (outputs to bin/xget)
 make build
 
-# Run linter
+# Run tests (with race detector)
+make test
+
+# Run linter (golangci-lint, 5m timeout)
 make lint
 
 # Update dependencies
@@ -31,6 +34,10 @@ go mod tidy -v
 # Build Docker image
 docker build -t xget .
 ```
+
+**Before committing:** always run `make lint` — 33 linters are active (see `.golangci.yml`). Common violations: `wsl_v5` blank-line rules, `godot` missing period on block comments, `lll` line length.
+
+**After changing imports:** run `go mod tidy` to keep direct/indirect dependency sections correct.
 
 ## Configuration
 
@@ -92,6 +99,33 @@ Files download to `.partial` suffix during transfer:
 - Existing partial files are resumed using Range requests
 - Only renamed to final destination after successful checksum verification
 - Failed downloads leave partial file for next retry
+
+## Key Dependencies
+
+- **Progress bars**: `github.com/vbauerster/mpb/v8` — used in `src/progress.go`. Do NOT add `schollz/progressbar` (removed).
+- **S3 client**: `github.com/aws/aws-sdk-go-v2` family.
+- **YAML parsing**: `gopkg.in/yaml.v3`.
+
+## Test Coverage
+
+Tested:
+
+- `src/config/` — comprehensive (config parsing, merging, env expansion)
+- `src/generate.go` — full table-driven tests
+
+**No tests exist for:**
+
+- `src/downloader.go`
+- `src/cache.go`
+- `src/storage/` (http.go, s3.go)
+- `src/progress.go`
+- `src/checksum.go`
+
+When touching those files, consider adding tests.
+
+## Output / Logging
+
+The codebase currently uses plain `fmt.Printf` / `fmt.Fprintf(os.Stderr, ...)` for all output — there is no structured logger. The `go-codestyle.md` rule about `logrus.FieldLogger` describes the desired direction but is not yet implemented. Do not add logrus to new code without a broader refactor plan.
 
 ## Code Style
 
