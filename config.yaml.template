@@ -25,7 +25,7 @@ aliases:
 # Cache configuration - references an alias
 cache:
   alias: cache          # use the "cache" alias defined above
-  enabled: true
+  enabled: true         # or use env var: ${CACHE_ENABLED}
 
 # Download settings
 settings:

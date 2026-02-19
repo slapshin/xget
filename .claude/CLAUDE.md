@@ -41,7 +41,11 @@ The application uses YAML config files (see `config.yaml.template` for full exam
 - **settings**: Download behavior (parallel, retries, retry_delay)
 - **files**: List of files to download with URLs, destinations, and SHA256 checksums
 
-Config supports environment variable expansion using `${VAR_NAME}` syntax in alias credentials and file destination paths.
+Config supports environment variable expansion using `${VAR_NAME}` syntax in:
+
+- Alias credentials and configuration fields
+- Cache enabled flag
+- File destination paths
 
 ## Architecture
 

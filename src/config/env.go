@@ -38,3 +38,9 @@ func expandAliasEnvVars(alias *Alias) {
 func expandFileEntryEnvVars(file *FileEntry) {
 	file.Dest = expandEnvVars(file.Dest)
 }
+
+// expandCacheEnvVars expands environment variables in cache config fields.
+func expandCacheEnvVars(cache *CacheConfig) {
+	cache.Alias = expandEnvVars(cache.Alias)
+	cache.Enabled = expandEnvVars(cache.Enabled)
+}

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -209,7 +210,7 @@ cache:
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !cfg.Cache.Enabled {
+	if !cfg.Cache.IsEnabled() {
 		t.Error("expected cache to be enabled")
 	}
 
@@ -253,7 +254,7 @@ cache:
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !cfg.Cache.Enabled {
+	if !cfg.Cache.IsEnabled() {
 		t.Error("expected cache to be enabled")
 	}
 
@@ -288,7 +289,7 @@ cache:
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if !cfg.Cache.Enabled {
+	if !cfg.Cache.IsEnabled() {
 		t.Error("expected cache to be enabled")
 	}
 
@@ -642,7 +643,7 @@ func TestMergeConfigs_EmptyOverride(t *testing.T) {
 		},
 		Cache: CacheConfig{
 			Alias:   "cache-alias",
-			Enabled: true,
+			Enabled: "true",
 		},
 		Settings: Settings{
 			Parallel: 5,
@@ -661,7 +662,7 @@ func TestMergeConfigs_EmptyOverride(t *testing.T) {
 		t.Errorf("expected 1 alias, got %d", len(base.Aliases))
 	}
 
-	if !base.Cache.Enabled {
+	if !base.Cache.IsEnabled() {
 		t.Error("expected cache to be enabled")
 	}
 
@@ -844,4 +845,87 @@ files:
 	}
 
 	assertFileEntry(t, cfg.Files[0], "http://example.com/file1.txt", "${NONEXISTENT_VAR}/file1.txt", "abc123")
+}
+
+func TestCacheEnabledEnvVarExpansion(t *testing.T) {
+	t.Setenv("CACHE_ENABLED", "true")
+
+	cfg, err := parseConfigs(t, []string{`
+aliases:
+  cache-alias:
+    endpoint: http://localhost:9000
+    region: us-east-1
+    bucket: cache-bucket
+    access_key: key
+    secret_key: secret
+
+cache:
+  alias: cache-alias
+  enabled: ${CACHE_ENABLED}
+
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Cache.IsEnabled() {
+		t.Error("expected cache to be enabled via env var")
+	}
+
+	if cfg.Cache.Alias != "cache-alias" {
+		t.Errorf("expected cache alias 'cache-alias', got %s", cfg.Cache.Alias)
+	}
+}
+
+func TestCacheEnabledLiteralValues(t *testing.T) {
+	tests := []struct {
+		name     string
+		value    string
+		expected bool
+	}{
+		{"true lowercase", "true", true},
+		{"true uppercase", "TRUE", true},
+		{"yes lowercase", "yes", true},
+		{"yes uppercase", "YES", true},
+		{"one", "1", true},
+		{"false", "false", false},
+		{"no", "no", false},
+		{"zero", "0", false},
+		{"empty", "", false},
+		{"random", "random", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := parseConfigs(t, []string{fmt.Sprintf(`
+aliases:
+  cache-alias:
+    endpoint: http://localhost:9000
+    region: us-east-1
+    bucket: cache-bucket
+    access_key: key
+    secret_key: secret
+
+cache:
+  alias: cache-alias
+  enabled: %s
+
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`, tt.value)})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if cfg.Cache.IsEnabled() != tt.expected {
+				t.Errorf("expected IsEnabled()=%v for value %q, got %v", tt.expected, tt.value, cfg.Cache.IsEnabled())
+			}
+		})
+	}
 }

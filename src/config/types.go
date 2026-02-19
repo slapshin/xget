@@ -35,7 +35,15 @@ func (alias Alias) IsNoSignRequest() bool {
 // CacheConfig represents the cache configuration.
 type CacheConfig struct {
 	Alias   string `yaml:"alias"`
-	Enabled bool   `yaml:"enabled"`
+	Enabled string `yaml:"enabled"`
+}
+
+// IsEnabled returns true if cache is enabled.
+// Accepts "true", "1", "yes" (case-insensitive) as truthy values.
+func (c CacheConfig) IsEnabled() bool {
+	v := strings.ToLower(strings.TrimSpace(c.Enabled))
+
+	return v == "true" || v == "1" || v == "yes"
 }
 
 // Settings represents download settings.

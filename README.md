@@ -207,7 +207,13 @@ files:
 
 ### Environment Variables
 
-The configuration supports environment variable expansion using `${VAR_NAME}` syntax in alias credentials and file destination paths:
+The configuration supports environment variable expansion using `${VAR_NAME}` syntax in:
+
+- **Alias credentials** - Access keys, secret keys, and configuration
+- **Cache enabled flag** - Enable/disable cache dynamically
+- **File destination paths** - Customize download locations
+
+**Example:**
 
 ```yaml
 aliases:
@@ -215,11 +221,25 @@ aliases:
     access_key: ${MINIO_ACCESS_KEY}
     secret_key: ${MINIO_SECRET_KEY}
 
+cache:
+  alias: minio
+  enabled: ${CACHE_ENABLED}  # "true", "1", "yes" for enabled
+
 files:
   - url: https://example.com/file.tar.gz
     dest: ${DOWNLOAD_DIR}/file.tar.gz
     sha256: abc123...
 ```
+
+**Cache enabled values:**
+
+The `cache.enabled` field accepts the following truthy values (case-insensitive):
+
+- `"true"`, `"TRUE"`
+- `"yes"`, `"YES"`
+- `"1"`
+
+All other values (including empty string) are treated as false.
 
 You can also omit `access_key` and `secret_key` fields to use standard AWS environment variables:
 

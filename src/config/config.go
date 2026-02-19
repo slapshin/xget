@@ -35,6 +35,9 @@ func Load(path string) (*Config, error) {
 		cfg.Aliases[name] = alias
 	}
 
+	// Expand environment variables in cache config.
+	expandCacheEnvVars(&cfg.Cache)
+
 	// Expand environment variables in file entries.
 	for i := range cfg.Files {
 		expandFileEntryEnvVars(&cfg.Files[i])
@@ -147,6 +150,9 @@ func parseWithoutValidation(data []byte) (*Config, error) {
 		cfg.Aliases[name] = alias
 	}
 
+	// Expand environment variables in cache config.
+	expandCacheEnvVars(&cfg.Cache)
+
 	// Expand environment variables in file entries.
 	for i := range cfg.Files {
 		expandFileEntryEnvVars(&cfg.Files[i])
@@ -170,8 +176,8 @@ func mergeConfigs(base *Config, override *Config) {
 		base.Cache.Alias = override.Cache.Alias
 	}
 
-	if override.Cache.Enabled {
-		base.Cache.Enabled = true
+	if override.Cache.Enabled != "" {
+		base.Cache.Enabled = override.Cache.Enabled
 	}
 
 	// Override settings if specified (non-zero values).
@@ -215,7 +221,7 @@ func applyDefaults(cfg *Config) {
 
 func validate(cfg *Config) error {
 	// Validate cache alias exists if cache is enabled.
-	if cfg.Cache.Enabled {
+	if cfg.Cache.IsEnabled() {
 		if cfg.Cache.Alias == "" {
 			return fmt.Errorf("cache enabled but no alias specified")
 		}
@@ -252,7 +258,7 @@ func (config *Config) GetAlias(name string) (Alias, bool) {
 
 // GetCacheAlias returns the cache alias if cache is enabled.
 func (config *Config) GetCacheAlias() (Alias, bool) {
-	if !config.Cache.Enabled {
+	if !config.Cache.IsEnabled() {
 		return Alias{}, false
 	}
 
