@@ -180,10 +180,10 @@ func (downloader *Downloader) downloadSegment(
 		return fmt.Errorf("writing segment: %w", err)
 	}
 
-	seg.Done = true
-
 	downloader.stateMu.Lock()
 	defer downloader.stateMu.Unlock()
+
+	seg.Done = true
 
 	err = SaveState(statePath, state)
 	if err != nil {
