@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"xget/src/config"
+	"xget/src/segment"
 	"xget/src/storage"
 
 	"github.com/vbauerster/mpb/v8"
@@ -206,6 +207,77 @@ func (downloader *Downloader) downloadFromSource(
 
 	partialPath := file.Dest + ".partial"
 
+	// Try segmented download first.
+	segmented, err := downloader.trySegmentedDownload(ctx, source, file, partialPath, progress)
+	if err != nil {
+		return err
+	}
+
+	if !segmented {
+		err = downloader.singleStreamDownload(ctx, source, file, partialPath, progress)
+		if err != nil {
+			return err
+		}
+	}
+
+	return finalizeDownload(partialPath, file)
+}
+
+func (downloader *Downloader) trySegmentedDownload(
+	ctx context.Context,
+	source storage.Source,
+	file config.FileEntry,
+	partialPath string,
+	progress *mpb.Progress,
+) (bool, error) {
+	segmentsPerFile := downloader.cfg.Settings.SegmentsPerFile
+	if segmentsPerFile <= 1 {
+		return false, nil
+	}
+
+	rangeSource, ok := source.(storage.RangeSource)
+	if !ok {
+		return false, nil
+	}
+
+	totalSize, err := rangeSource.GetSize(ctx)
+	if err != nil || totalSize <= 0 {
+		return false, nil //nolint:nilerr // fall back to single stream on size probe errors.
+	}
+
+	if totalSize < downloader.cfg.Settings.SegmentMinSize {
+		return false, nil
+	}
+
+	acceptsRanges, err := rangeSource.AcceptsRanges(ctx)
+	if err != nil || !acceptsRanges {
+		return false, nil //nolint:nilerr // fall back to single stream when ranges unsupported.
+	}
+
+	segDownloader := segment.NewDownloader(
+		rangeSource,
+		totalSize,
+		partialPath,
+		segmentsPerFile,
+		progress,
+		file.Dest,
+	)
+
+	err = segDownloader.Download(ctx)
+	if err != nil {
+		return true, fmt.Errorf("segmented download: %w", err)
+	}
+
+	return true, nil
+}
+
+func (downloader *Downloader) singleStreamDownload(
+	ctx context.Context,
+	source storage.Source,
+	file config.FileEntry,
+	partialPath string,
+	progress *mpb.Progress,
+) error {
 	destFile, offset, err := openPartialFile(partialPath)
 	if err != nil {
 		return fmt.Errorf("creating destination file: %w", err)
@@ -213,12 +285,7 @@ func (downloader *Downloader) downloadFromSource(
 
 	defer destFile.Close()
 
-	err = downloader.performDownload(ctx, source, destFile, file, offset, progress)
-	if err != nil {
-		return err
-	}
-
-	return finalizeDownload(partialPath, file)
+	return downloader.performDownload(ctx, source, destFile, file, offset, progress)
 }
 
 func openPartialFile(path string) (*os.File, int64, error) {

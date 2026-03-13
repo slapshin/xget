@@ -140,7 +140,7 @@ func runGenerate() int {
 	}
 
 	if outputFile != "" {
-		err = os.WriteFile(outputFile, data, 0o600)
+		err = os.WriteFile(outputFile, data, 0o600) //nolint:gosec // path is from CLI argument
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error writing output file: %v\n", err)
 

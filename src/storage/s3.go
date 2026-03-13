@@ -170,6 +170,28 @@ func (s3Source *S3Source) GetSize(ctx context.Context) (int64, error) {
 	return *result.ContentLength, nil
 }
 
+// DownloadRange downloads bytes [start, end] inclusive.
+func (s3Source *S3Source) DownloadRange(ctx context.Context, start, end int64) (io.ReadCloser, error) {
+	input := &s3.GetObjectInput{
+		Bucket: aws.String(s3Source.bucket),
+		Key:    aws.String(s3Source.key),
+		Range:  aws.String(fmt.Sprintf("bytes=%d-%d", start, end)),
+	}
+
+	result, err := s3Source.client.GetObject(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("getting object range: %w", err)
+	}
+
+	return result.Body, nil
+}
+
+// AcceptsRanges reports whether the server accepts Range requests.
+// S3 always supports range requests.
+func (s3Source *S3Source) AcceptsRanges(_ context.Context) (bool, error) {
+	return true, nil
+}
+
 // Upload uploads content to S3.
 func (s3Source *S3Source) Upload(ctx context.Context, reader io.Reader) error {
 	_, err := s3Source.client.PutObject(ctx, &s3.PutObjectInput{

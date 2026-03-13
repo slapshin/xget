@@ -5,8 +5,8 @@ aliases:
     endpoint: https://s3.amazonaws.com
     region: us-east-1
     bucket: my-bucket
-    access_key: ""      # optional, falls back to AWS_ACCESS_KEY_ID env var
-    secret_key: ""      # optional, falls back to AWS_SECRET_ACCESS_KEY env var
+    access_key: "" # optional, falls back to AWS_ACCESS_KEY_ID env var
+    secret_key: "" # optional, falls back to AWS_SECRET_ACCESS_KEY env var
 
   # MinIO example with env var substitution
   minio:
@@ -20,18 +20,20 @@ aliases:
     endpoint: https://s3.amazonaws.com
     region: us-east-1
     bucket: download-cache
-    prefix: files/      # optional key prefix
+    prefix: files/ # optional key prefix
 
 # Cache configuration - references an alias
 cache:
-  alias: cache          # use the "cache" alias defined above
-  enabled: true         # or use env var: ${CACHE_ENABLED}
+  alias: cache # use the "cache" alias defined above
+  enabled: true # or use env var: ${CACHE_ENABLED}
 
 # Download settings
 settings:
-  parallel: 4           # max concurrent downloads
-  retries: 3            # retry attempts on failure
-  retry_delay: 5s       # delay between retries
+  parallel: 4 # max concurrent downloads
+  retries: 3 # retry attempts on failure
+  retry_delay: 5s # delay between retries
+  segments_per_file: 4 # connections per file (segmented download)
+  segment_min_size: 10485760 # minimum file size for segmented download (10MB)
 
 # Files to download
 files:

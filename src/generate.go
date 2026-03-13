@@ -21,6 +21,8 @@ type GenerateOutput struct {
 
 // generateConfig generates a config file by scanning a directory.
 func generateConfig(dirPath string) ([]byte, error) {
+	dirPath = filepath.Clean(dirPath)
+
 	info, err := os.Stat(dirPath)
 	if err != nil {
 		return nil, fmt.Errorf("accessing directory: %w", err)
@@ -51,6 +53,8 @@ func generateConfig(dirPath string) ([]byte, error) {
 
 // walkDirectory walks a directory tree and returns file entries.
 func walkDirectory(baseDir string) ([]config.FileEntry, error) {
+	baseDir = filepath.Clean(baseDir)
+
 	var entries []config.FileEntry
 
 	var warnings []string

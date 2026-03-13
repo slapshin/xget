@@ -9,10 +9,12 @@ import (
 )
 
 const (
-	defaultParallel   = 4
-	defaultRetries    = 3
-	defaultRetryDelay = 5 * time.Second
-	defaultTimeout    = 10 * time.Minute
+	defaultParallel        = 4
+	defaultRetries         = 3
+	defaultRetryDelay      = 5 * time.Second
+	defaultTimeout         = 10 * time.Minute
+	defaultSegmentsPerFile = 4
+	defaultSegmentMinSize  = 10 * 1024 * 1024 // 10 MB.
 )
 
 // Load reads and parses a YAML config file.
@@ -180,25 +182,36 @@ func mergeConfigs(base *Config, override *Config) {
 		base.Cache.Enabled = override.Cache.Enabled
 	}
 
-	// Override settings if specified (non-zero values).
-	if override.Settings.Parallel > 0 {
-		base.Settings.Parallel = override.Settings.Parallel
-	}
-
-	if override.Settings.Retries > 0 {
-		base.Settings.Retries = override.Settings.Retries
-	}
-
-	if override.Settings.RetryDelay > 0 {
-		base.Settings.RetryDelay = override.Settings.RetryDelay
-	}
-
-	if override.Settings.Timeout > 0 {
-		base.Settings.Timeout = override.Settings.Timeout
-	}
+	mergeSettings(&base.Settings, &override.Settings)
 
 	// Accumulate files.
 	base.Files = append(base.Files, override.Files...)
+}
+
+func mergeSettings(base *Settings, override *Settings) {
+	if override.Parallel > 0 {
+		base.Parallel = override.Parallel
+	}
+
+	if override.Retries > 0 {
+		base.Retries = override.Retries
+	}
+
+	if override.RetryDelay > 0 {
+		base.RetryDelay = override.RetryDelay
+	}
+
+	if override.Timeout > 0 {
+		base.Timeout = override.Timeout
+	}
+
+	if override.SegmentsPerFile > 0 {
+		base.SegmentsPerFile = override.SegmentsPerFile
+	}
+
+	if override.SegmentMinSize > 0 {
+		base.SegmentMinSize = override.SegmentMinSize
+	}
 }
 
 func applyDefaults(cfg *Config) {
@@ -216,6 +229,14 @@ func applyDefaults(cfg *Config) {
 
 	if cfg.Settings.Timeout <= 0 {
 		cfg.Settings.Timeout = defaultTimeout
+	}
+
+	if cfg.Settings.SegmentsPerFile <= 0 {
+		cfg.Settings.SegmentsPerFile = defaultSegmentsPerFile
+	}
+
+	if cfg.Settings.SegmentMinSize <= 0 {
+		cfg.Settings.SegmentMinSize = defaultSegmentMinSize
 	}
 }
 

@@ -9,12 +9,13 @@ linters:
     - containedctx
     - cyclop
     - decorder
+    # - dupl
     - errcheck
     - errorlint
     - gochecknoinits
     - gocritic
     - godot
-    # - gosec
+    - gosec
     - govet
     - grouper
     - importas
@@ -31,8 +32,12 @@ linters:
     - whitespace
     - wsl_v5
     - testifylint
+    # - canonicalheader 
+    # - contextcheck
     - inamedparam
     - mirror
+    - nonamedreturns
+    # - mnd
   settings:
     nonamedreturns:
       report-error-in-defer: true

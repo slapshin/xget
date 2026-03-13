@@ -145,3 +145,14 @@ See `.claude/rules/commit-messages.md` for format. Summary:
 - Format: `<type>: <subject>` (types: feat, fix, refactor, perf, test, docs, build, ci, chore)
 - Imperative mood, lowercase, no period, max 50 chars
 - Example: `feat: add retry mechanism for failed downloads`
+
+## Subagents
+
+Use these subagents automatically when the situation matches — no need to ask.
+
+| Agent | When to use |
+|---|---|
+| `go-reviewer` | After writing or modifying any Go file — review against codestyle rules |
+| `security-auditor` | When auth, key handling, command execution, or config parsing is touched |
+| `test-runner` | When asked to run tests or when a test failure needs to be diagnosed and fixed |
+| `lint-runner` | After writing or modifying any Go file — run `make lint` and fix any reported issues |

@@ -48,10 +48,12 @@ func (c CacheConfig) IsEnabled() bool {
 
 // Settings represents download settings.
 type Settings struct {
-	Parallel   int           `yaml:"parallel"`
-	Retries    int           `yaml:"retries"`
-	RetryDelay time.Duration `yaml:"retry_delay"`
-	Timeout    time.Duration `yaml:"timeout"`
+	Parallel       int           `yaml:"parallel"`
+	Retries        int           `yaml:"retries"`
+	RetryDelay     time.Duration `yaml:"retry_delay"`
+	Timeout        time.Duration `yaml:"timeout"`
+	SegmentsPerFile int          `yaml:"segments_per_file"`
+	SegmentMinSize  int64        `yaml:"segment_min_size"`
 }
 
 // FileEntry represents a file to download.
