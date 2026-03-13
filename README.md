@@ -5,7 +5,8 @@ A high-performance parallel file downloader with caching capabilities for HTTP/H
 ## Features
 
 - **Parallel Downloads** - Configurable concurrent downloads with worker pool pattern
-- **Download Resumption** - Automatically resume interrupted downloads from partial files
+- **Segmented Downloads** - Split large files into multiple segments downloaded in parallel for faster throughput
+- **Download Resumption** - Automatically resume interrupted downloads from partial files, including per-segment resume for segmented downloads
 - **SHA256 Verification** - Built-in checksum validation for integrity assurance
 - **S3 Caching Layer** - Content-addressable cache to deduplicate downloads
 - **Retry Mechanism** - Exponential backoff with configurable retry attempts
@@ -186,6 +187,8 @@ settings:
   parallel: 4           # max concurrent downloads (default: 4)
   retries: 3            # retry attempts on failure (default: 3)
   retry_delay: 5s       # delay between retries (default: 5s)
+  segments_per_file: 4  # parallel segments per large file (default: 4)
+  segment_min_size: 10485760  # min file size for segmented download in bytes (default: 10MB)
 
 # Files to download
 files:
@@ -271,6 +274,17 @@ Where `alias` references a storage endpoint defined in the `aliases` section.
 3. **Download from Source** - Download with retry logic and exponential backoff
 4. **Verify Checksum** - Validate SHA256 hash against expected value
 5. **Update Cache** - Upload to cache on successful download (if cache enabled)
+
+### Segmented Downloads
+
+For large files, xget splits the download into multiple segments that are fetched in parallel:
+
+- Activated automatically when the file size meets the `segment_min_size` threshold (default: 10MB)
+- Each file is divided into `segments_per_file` equal byte ranges (default: 4)
+- All segments download concurrently using separate HTTP Range requests
+- The full file is pre-allocated on disk, and each segment writes to its correct offset
+- Segment completion state is persisted to a `.segments` file, enabling per-segment resume on interruption
+- Falls back to single-stream download when the source doesn't support Range requests or the file is below the threshold
 
 ### Partial Downloads
 
@@ -430,6 +444,10 @@ xget/
 │   │   ├── config.go        # YAML loading and validation
 │   │   ├── types.go         # Config structures
 │   │   └── env.go           # Environment variable expansion
+│   ├── segment/             # Segmented download support
+│   │   ├── download.go      # Parallel segment orchestration
+│   │   ├── state.go         # Segment state persistence
+│   │   └── progress.go      # Thread-safe progress tracking
 │   └── storage/             # Download source abstractions
 │       ├── storage.go       # Source interface
 │       ├── http.go          # HTTP/HTTPS implementation
@@ -503,6 +521,8 @@ type Source interface {
 The downloader uses a worker pool pattern with semaphore channel to limit concurrency:
 
 - Processes files in parallel up to configured limit
+- Automatically uses segmented downloads for large files when the source supports Range requests
+- Falls back to single-stream download for small files or sources without Range support
 - Handles partial file resume with `.partial` suffix
 - Implements retry logic with exponential backoff
 - Propagates context cancellation for graceful shutdown

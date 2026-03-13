@@ -175,9 +175,19 @@ func (downloader *Downloader) downloadSegment(
 
 	offsetWriter := io.NewOffsetWriter(file, seg.Start)
 
-	_, err = io.Copy(io.MultiWriter(offsetWriter, progressWriter), reader)
+	expectedBytes := seg.End - seg.Start + 1
+
+	n, err := io.Copy(io.MultiWriter(offsetWriter, progressWriter), reader)
 	if err != nil {
+		if err == io.ErrUnexpectedEOF {
+			return fmt.Errorf("short read: expected %d bytes, got %d", expectedBytes, n)
+		}
+
 		return fmt.Errorf("writing segment: %w", err)
+	}
+
+	if n != expectedBytes {
+		return fmt.Errorf("short read: expected %d bytes, got %d", expectedBytes, n)
 	}
 
 	downloader.stateMu.Lock()
