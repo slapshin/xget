@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -270,7 +271,7 @@ func TestSegmentedDownloadShortRead(t *testing.T) {
 func newOneSegmentShortReadServer(t *testing.T, content []byte) *httptest.Server {
 	t.Helper()
 
-	callCount := 0
+	var callCount atomic.Int32
 
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodHead {
@@ -291,10 +292,10 @@ func newOneSegmentShortReadServer(t *testing.T, content []byte) *httptest.Server
 		}
 
 		slice := content[start : end+1]
-		callCount++
+		count := callCount.Add(1)
 
 		// Truncate only the very first range request.
-		if callCount == 1 && len(slice) > 10 {
+		if count == 1 && len(slice) > 10 {
 			slice = slice[:len(slice)-10]
 		}
 
