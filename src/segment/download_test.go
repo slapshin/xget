@@ -107,12 +107,13 @@ func TestSegmentedDownload(t *testing.T) {
 		t.Errorf("content mismatch: got %d bytes, want %d bytes", len(got), len(content))
 	}
 
-	// State file should be cleaned up.
+	// State file should still exist — cleanup is the caller's responsibility
+	// (after checksum verification and file rename).
 	statePath := StatePath(partialPath)
 
 	_, err = os.Stat(statePath)
-	if !os.IsNotExist(err) {
-		t.Error("state file should be removed after successful download")
+	if os.IsNotExist(err) {
+		t.Error("state file should be preserved after Download() for caller to clean up")
 	}
 }
 
@@ -264,13 +265,14 @@ func TestSegmentedDownloadShortRead(t *testing.T) {
 	}
 }
 
-func TestSegmentedDownloadShortReadOneSegment(t *testing.T) {
-	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes, 4 segments of 250 bytes.
+// newOneSegmentShortReadServer returns a test server that truncates only the
+// first range request to simulate a short read on one segment.
+func newOneSegmentShortReadServer(t *testing.T, content []byte) *httptest.Server {
+	t.Helper()
 
 	callCount := 0
 
-	// Only truncate the first range request; subsequent ones respond correctly.
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodHead {
 			w.Header().Set("Accept-Ranges", "bytes")
 			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
@@ -301,6 +303,12 @@ func TestSegmentedDownloadShortReadOneSegment(t *testing.T) {
 		w.WriteHeader(http.StatusPartialContent)
 		_, _ = w.Write(slice)
 	}))
+}
+
+func TestSegmentedDownloadShortReadOneSegment(t *testing.T) {
+	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes, 4 segments of 250 bytes.
+
+	server := newOneSegmentShortReadServer(t, content)
 	defer server.Close()
 
 	source := storage.NewHTTPSource(server.URL, 30*time.Second)

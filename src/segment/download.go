@@ -2,6 +2,7 @@ package segment
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -80,9 +81,6 @@ func (downloader *Downloader) Download(ctx context.Context) error {
 	}
 
 	progressWriter.Finish()
-
-	// Clean up state file on success.
-	os.Remove(statePath)
 
 	return nil
 }
@@ -179,7 +177,7 @@ func (downloader *Downloader) downloadSegment(
 
 	n, err := io.Copy(io.MultiWriter(offsetWriter, progressWriter), reader)
 	if err != nil {
-		if err == io.ErrUnexpectedEOF {
+		if errors.Is(err, io.ErrUnexpectedEOF) {
 			return fmt.Errorf("short read: expected %d bytes, got %d", expectedBytes, n)
 		}
 

@@ -13,6 +13,7 @@ import (
 	"xget/src/segment"
 	"xget/src/storage"
 
+
 	"github.com/vbauerster/mpb/v8"
 )
 
@@ -220,7 +221,17 @@ func (downloader *Downloader) downloadFromSource(
 		}
 	}
 
-	return finalizeDownload(partialPath, file)
+	err = finalizeDownload(partialPath, file)
+	if err != nil {
+		return err
+	}
+
+	// Clean up segment state file after successful finalization.
+	if segmented {
+		os.Remove(segment.StatePath(partialPath))
+	}
+
+	return nil
 }
 
 func (downloader *Downloader) trySegmentedDownload(
@@ -278,6 +289,16 @@ func (downloader *Downloader) singleStreamDownload(
 	partialPath string,
 	progress *mpb.Progress,
 ) error {
+	// If a segment state file exists, the partial file was pre-allocated by a
+	// segmented download and its size does not reflect sequential progress.
+	// Remove both to start a clean single-stream download.
+	statePath := segment.StatePath(partialPath)
+
+	if _, statErr := os.Stat(statePath); statErr == nil {
+		os.Remove(partialPath)
+		os.Remove(statePath)
+	}
+
 	destFile, offset, err := openPartialFile(partialPath)
 	if err != nil {
 		return fmt.Errorf("creating destination file: %w", err)
@@ -349,6 +370,7 @@ func finalizeDownload(partialPath string, file config.FileEntry) error {
 
 	if !valid {
 		os.Remove(partialPath)
+		os.Remove(segment.StatePath(partialPath))
 
 		return fmt.Errorf("checksum mismatch for %s", file.Dest)
 	}
