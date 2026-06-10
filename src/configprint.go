@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -12,7 +13,7 @@ import (
 // printConfig prints a human-readable summary of the effective config,
 // masking credentials in aliases and userinfo in file URLs.
 func printConfig(cfg config.Config) {
-	fmt.Println("\nSettings:")
+	fmt.Println("\nsettings:")
 	fmt.Printf("  parallel:          %d\n", cfg.Settings.Parallel)
 	fmt.Printf("  retries:           %d\n", cfg.Settings.Retries)
 	fmt.Printf("  retry_delay:       %s\n", cfg.Settings.RetryDelay)
@@ -20,7 +21,7 @@ func printConfig(cfg config.Config) {
 	fmt.Printf("  segments_per_file: %d\n", cfg.Settings.SegmentsPerFile)
 	fmt.Printf("  segment_min_size:  %d\n", cfg.Settings.SegmentMinSize)
 
-	fmt.Println("Cache:")
+	fmt.Println("cache:")
 	fmt.Printf("  enabled: %t\n", cfg.Cache.IsEnabled())
 	fmt.Printf("  alias:   %s\n", cfg.Cache.Alias)
 
@@ -32,7 +33,7 @@ func printConfig(cfg config.Config) {
 
 // printAliases prints each alias with credentials masked.
 func printAliases(aliases map[string]config.Alias) {
-	fmt.Printf("Aliases (%d):\n", len(aliases))
+	fmt.Printf("aliases (%d):\n", len(aliases))
 
 	for _, name := range sortedAliasNames(aliases) {
 		alias := aliases[name]
@@ -50,7 +51,7 @@ func printAliases(aliases map[string]config.Alias) {
 
 // printFiles prints each file entry with URL userinfo redacted.
 func printFiles(files []config.FileEntry) {
-	fmt.Printf("Files (%d):\n", len(files))
+	fmt.Printf("files (%d):\n", len(files))
 
 	for _, file := range files {
 		fmt.Printf("  - url:  %s\n", redactURL(file.URL))
@@ -83,10 +84,19 @@ func mask(secret string) string {
 	return "***"
 }
 
+// envPlaceholderPattern matches an unexpanded ${VAR} env var reference.
+var envPlaceholderPattern = regexp.MustCompile(`\$\{[^}]+\}`)
+
 // maskTail masks a credential, reporting unset values explicitly.
+// A value still holding an unexpanded ${VAR} placeholder is not a real secret,
+// so it is shown verbatim to surface the missing environment variable.
 func maskTail(secret string) string {
 	if secret == "" {
 		return "<not set>"
+	}
+
+	if envPlaceholderPattern.MatchString(secret) {
+		return secret
 	}
 
 	return mask(secret)
