@@ -136,11 +136,6 @@ func (downloader *Downloader) downloadWithRetry(
 	var lastErr error
 
 	for attempt := 1; attempt <= downloader.cfg.Settings.Retries; attempt++ {
-		if attempt > 1 {
-			fmt.Printf("retry %d/%d for %s\n", attempt, downloader.cfg.Settings.Retries, file.URL)
-			time.Sleep(downloader.cfg.Settings.RetryDelay)
-		}
-
 		err := downloader.downloadFromSource(ctx, file, progress)
 		if err == nil {
 			downloader.uploadToCache(ctx, file)
@@ -152,6 +147,12 @@ func (downloader *Downloader) downloadWithRetry(
 
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+
+		if attempt < downloader.cfg.Settings.Retries {
+			fmt.Printf("attempt %d/%d for %s failed: %v, retrying...\n",
+				attempt, downloader.cfg.Settings.Retries, file.URL, err)
+			time.Sleep(downloader.cfg.Settings.RetryDelay)
 		}
 	}
 
