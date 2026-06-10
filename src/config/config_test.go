@@ -979,7 +979,11 @@ files:
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg, err := parseConfigs(t, append(tt.configs, filesConfig))
+			allConfigs := make([]string, 0, len(tt.configs)+1)
+			allConfigs = append(allConfigs, tt.configs...)
+			allConfigs = append(allConfigs, filesConfig)
+
+			cfg, err := parseConfigs(t, allConfigs)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

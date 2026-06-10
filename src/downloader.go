@@ -13,7 +13,6 @@ import (
 	"xget/src/segment"
 	"xget/src/storage"
 
-
 	"github.com/vbauerster/mpb/v8"
 )
 
