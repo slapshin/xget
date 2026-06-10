@@ -35,6 +35,16 @@ func NewHTTPSource(url string, timeout time.Duration) *HTTPSource {
 	http1Transport.ForceAttemptHTTP2 = false
 	http1Transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
 
+	// Clone() initializes HTTP/2 on the base transport first, which leaves
+	// "h2" in the cloned TLS ALPN list. Without scrubbing it the server still
+	// negotiates HTTP/2 during the handshake and answers with HTTP/2 frames
+	// that the HTTP/1.1 connection cannot parse ("malformed HTTP response").
+	if http1Transport.TLSClientConfig == nil {
+		http1Transport.TLSClientConfig = &tls.Config{}
+	}
+
+	http1Transport.TLSClientConfig.NextProtos = []string{"http/1.1"}
+
 	return &HTTPSource{
 		url: url,
 		client: &http.Client{

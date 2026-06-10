@@ -3,9 +3,11 @@ package storage
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -28,6 +30,63 @@ func TestNewHTTPSourceDisablesHTTP2(t *testing.T) {
 
 	if len(transport.TLSNextProto) != 0 {
 		t.Fatalf("TLSNextProto must be empty, got %d entries", len(transport.TLSNextProto))
+	}
+
+	nextProtos := transport.TLSClientConfig.NextProtos
+	if len(nextProtos) != 1 || nextProtos[0] != "http/1.1" {
+		t.Fatalf("TLS ALPN must offer only http/1.1, got %v", nextProtos)
+	}
+}
+
+// TestHTTPSourceUsesHTTP1AgainstHTTP2Server reproduces the Cloudflare R2
+// failure: against a server that supports HTTP/2 the TLS handshake must not
+// negotiate it, otherwise the server answers with HTTP/2 frames that the
+// HTTP/1.1 connection cannot parse ("malformed HTTP response").
+func TestHTTPSourceUsesHTTP1AgainstHTTP2Server(t *testing.T) {
+	content := []byte("0123456789abcdefghij")
+
+	var proto atomic.Value
+
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		proto.Store(r.Proto)
+		http.ServeContent(w, r, "file.bin", time.Time{}, bytes.NewReader(content))
+	}))
+	server.EnableHTTP2 = true
+	server.StartTLS()
+
+	defer server.Close()
+
+	source := NewHTTPSource(server.URL, 5*time.Second)
+
+	transport, ok := source.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("got transport type %T, want *http.Transport", source.client.Transport)
+	}
+
+	// Trust the test server certificate.
+	certPool := x509.NewCertPool()
+	certPool.AddCert(server.Certificate())
+	transport.TLSClientConfig.RootCAs = certPool
+
+	reader, err := source.DownloadRange(context.Background(), 5, 9)
+	if err != nil {
+		t.Fatalf("DownloadRange against HTTP/2-capable server: %v", err)
+	}
+
+	defer reader.Close()
+
+	got, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("reading range body: %v", err)
+	}
+
+	if string(got) != "56789" {
+		t.Fatalf("got %q, want %q", got, "56789")
+	}
+
+	gotProto, _ := proto.Load().(string)
+	if gotProto != "HTTP/1.1" {
+		t.Fatalf("got protocol %q, want HTTP/1.1", gotProto)
 	}
 }
 
