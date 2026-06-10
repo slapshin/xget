@@ -36,6 +36,7 @@ settings:
   retry_delay: 5s # delay between retries (or ${RETRY_DELAY})
   segments_per_file: 4 # connections per file (segmented download)
   segment_min_size: 10485760 # minimum file size for segmented download (10MB)
+  single_stream: false # force single-stream download, disable segmentation (or ${SINGLE_STREAM})
 
 # Files to download
 files:

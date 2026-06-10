@@ -198,6 +198,7 @@ settings:
   timeout: 10m          # per-download timeout (default: 10m)
   segments_per_file: 4  # parallel segments per large file (default: 4)
   segment_min_size: 10485760  # min file size for segmented download in bytes (default: 10MB)
+  single_stream: false  # force single-stream download, disabling segmentation (default: false)
 
 # Files to download
 files:
@@ -223,7 +224,7 @@ The configuration supports environment variable expansion using `${VAR_NAME}` sy
 
 - **Alias fields** - Endpoint, region, bucket, prefix, access key, secret key, and `no_sign_request`
 - **Cache config** - The cache `alias` reference and `enabled` flag
-- **Download settings** - `parallel`, `retries`, `retry_delay`, `timeout`, `segments_per_file`, `segment_min_size`
+- **Download settings** - `parallel`, `retries`, `retry_delay`, `timeout`, `segments_per_file`, `segment_min_size`, `single_stream`
 - **File destination paths** - Customize download locations
 
 Unset `${VAR}` references are left as the literal `${VAR}` text rather than being emptied, which surfaces missing exports instead of silently downloading to the wrong place.
@@ -297,6 +298,7 @@ For large files, xget splits the download into multiple segments that are fetche
 - The full file is pre-allocated on disk, and each segment writes to its correct offset
 - Segment completion state is persisted to a `.segments` file, enabling per-segment resume on interruption
 - Falls back to single-stream download when the source doesn't support Range requests or the file is below the threshold
+- Can be disabled entirely with `single_stream: true` (accepts `"true"`, `"1"`, `"yes"`, case-insensitive), forcing every file to download as a plain single stream
 
 ### Partial Downloads
 

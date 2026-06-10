@@ -211,6 +211,10 @@ func mergeSettings(base *Settings, override *Settings) {
 	if override.SegmentMinSize > 0 {
 		base.SegmentMinSize = override.SegmentMinSize
 	}
+
+	if override.SingleStream != "" {
+		base.SingleStream = override.SingleStream
+	}
 }
 
 func applyDefaults(cfg *Config) {

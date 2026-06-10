@@ -242,6 +242,10 @@ func (downloader *Downloader) trySegmentedDownload(
 	partialPath string,
 	progress *mpb.Progress,
 ) (bool, error) {
+	if downloader.cfg.Settings.IsSingleStream() {
+		return false, nil
+	}
+
 	segmentsPerFile := downloader.cfg.Settings.SegmentsPerFile
 	if segmentsPerFile <= 1 {
 		return false, nil

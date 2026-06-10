@@ -58,6 +58,15 @@ type Settings struct {
 	Timeout        time.Duration `yaml:"timeout"`
 	SegmentsPerFile int          `yaml:"segments_per_file"`
 	SegmentMinSize  int64        `yaml:"segment_min_size"`
+	SingleStream    string       `yaml:"single_stream"`
+}
+
+// IsSingleStream returns true if segmented download is disabled.
+// Accepts "true", "1", "yes" (case-insensitive) as truthy values.
+func (settings Settings) IsSingleStream() bool {
+	v := strings.ToLower(strings.TrimSpace(settings.SingleStream))
+
+	return v == "true" || v == "1" || v == "yes"
 }
 
 // UnmarshalYAML expands ${VAR} env vars in each setting before parsing it into
@@ -72,6 +81,7 @@ func (settings *Settings) UnmarshalYAML(value *yaml.Node) error {
 		Timeout         string `yaml:"timeout"`
 		SegmentsPerFile string `yaml:"segments_per_file"`
 		SegmentMinSize  string `yaml:"segment_min_size"`
+		SingleStream    string `yaml:"single_stream"`
 	}
 
 	err := value.Decode(&raw)
@@ -108,6 +118,8 @@ func (settings *Settings) UnmarshalYAML(value *yaml.Node) error {
 	if err != nil {
 		return err
 	}
+
+	settings.SingleStream = strings.TrimSpace(expandEnvVars(raw.SingleStream))
 
 	return nil
 }
