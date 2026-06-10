@@ -74,12 +74,19 @@ docker run -v $(pwd)/config.yaml:/config.yaml xget /config.yaml
 xget <config.yaml>
 ```
 
-The tool takes a single argument - the path to a YAML configuration file that defines:
+The tool takes one or more arguments - paths to YAML configuration files that define:
 
 - Storage endpoints (aliases)
 - Cache configuration
 - Download settings
 - List of files to download
+
+```bash
+# Multiple configs can be passed; they are merged in order
+xget base.yaml overrides.yaml
+```
+
+On startup, xget prints the effective merged configuration before downloading. Credentials are masked (only the last few characters are shown) and URL userinfo is redacted, so the output is safe to share in logs. Any unexpanded `${VAR}` placeholders are printed verbatim, making missing environment variables easy to spot.
 
 ### Generate Config from Directory
 
@@ -169,6 +176,7 @@ aliases:
     bucket: artifacts
     access_key: ${MINIO_ACCESS_KEY}
     secret_key: ${MINIO_SECRET_KEY}
+    no_sign_request: false   # optional, set true for anonymous/public buckets
 
   # Cache storage
   cache:
@@ -187,6 +195,7 @@ settings:
   parallel: 4           # max concurrent downloads (default: 4)
   retries: 3            # retry attempts on failure (default: 3)
   retry_delay: 5s       # delay between retries (default: 5s)
+  timeout: 10m          # per-download timeout (default: 10m)
   segments_per_file: 4  # parallel segments per large file (default: 4)
   segment_min_size: 10485760  # min file size for segmented download in bytes (default: 10MB)
 
@@ -212,9 +221,12 @@ files:
 
 The configuration supports environment variable expansion using `${VAR_NAME}` syntax in:
 
-- **Alias credentials** - Access keys, secret keys, and configuration
-- **Cache enabled flag** - Enable/disable cache dynamically
+- **Alias fields** - Endpoint, region, bucket, prefix, access key, secret key, and `no_sign_request`
+- **Cache config** - The cache `alias` reference and `enabled` flag
+- **Download settings** - `parallel`, `retries`, `retry_delay`, `timeout`, `segments_per_file`, `segment_min_size`
 - **File destination paths** - Customize download locations
+
+Unset `${VAR}` references are left as the literal `${VAR}` text rather than being emptied, which surfaces missing exports instead of silently downloading to the wrong place.
 
 **Example:**
 
@@ -440,6 +452,8 @@ xget/
 │   ├── cache.go             # S3-based caching layer
 │   ├── checksum.go          # SHA256 verification
 │   ├── progress.go          # Progress bar wrapper
+│   ├── generate.go          # Config generation from a directory
+│   ├── configprint.go       # Effective-config printer (with masking)
 │   ├── config/              # Configuration management
 │   │   ├── config.go        # YAML loading and validation
 │   │   ├── types.go         # Config structures
@@ -511,6 +525,16 @@ type Source interface {
 }
 ```
 
+Sources that support parallel segmented downloads additionally implement `RangeSource`:
+
+```go
+type RangeSource interface {
+    Source
+    DownloadRange(ctx context.Context, start, end int64) (io.ReadCloser, error)
+    AcceptsRanges(ctx context.Context) (bool, error)
+}
+```
+
 **Implementations:**
 
 - **HTTPSource** - Downloads via HTTP/HTTPS with Range request support
@@ -538,7 +562,7 @@ S3-based content-addressable cache:
 ## Dependencies
 
 - **AWS SDK for Go v2** - S3/MinIO operations
-- **progressbar** - Terminal progress visualization
+- **mpb/v8** (`github.com/vbauerster/mpb/v8`) - Terminal progress bars
 - **yaml.v3** - Configuration parsing
 
 Full dependency list in `go.mod`.
