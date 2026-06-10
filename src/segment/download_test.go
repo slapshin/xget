@@ -225,10 +225,11 @@ func newShortReadServer(t *testing.T, content []byte, truncateBytes int) *httpte
 	}))
 }
 
-func TestSegmentedDownloadShortRead(t *testing.T) {
+func TestSegmentedDownloadShortReadRecovers(t *testing.T) {
 	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes.
 
-	// Server drops the last 10 bytes of every range response.
+	// Server drops the last 10 bytes of every range response; the per-segment
+	// retry resumes from the bytes already written and completes the download.
 	server := newShortReadServer(t, content, 10)
 	defer server.Close()
 
@@ -247,22 +248,179 @@ func TestSegmentedDownloadShortRead(t *testing.T) {
 		progress,
 		"testfile",
 	)
+	downloader.retryDelay = 10 * time.Millisecond
+
+	err := downloader.Download(context.Background())
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+
+	progress.Wait()
+
+	got, err := os.ReadFile(partialPath)
+	if err != nil {
+		t.Fatalf("reading result: %v", err)
+	}
+
+	if string(got) != string(content) {
+		t.Errorf("content mismatch: got %d bytes, want %d bytes", len(got), len(content))
+	}
+}
+
+// newEmptyRangeServer returns a test server that declares the full range
+// length but never writes a body, so every range request fails mid-stream.
+func newEmptyRangeServer(t *testing.T, content []byte) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
+		var start, end int64
+
+		_, err := fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &start, &end)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+
+			return
+		}
+
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(content)))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		// No body written: the connection closes short of Content-Length.
+	}))
+}
+
+func TestSegmentedDownloadExhaustsRetries(t *testing.T) {
+	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes.
+
+	server := newEmptyRangeServer(t, content)
+	defer server.Close()
+
+	source := storage.NewHTTPSource(server.URL, 30*time.Second)
+
+	dir := t.TempDir()
+	partialPath := filepath.Join(dir, "testfile.partial")
+
+	progress := mpb.New(mpb.WithOutput(io.Discard))
+
+	downloader := NewDownloader(
+		source,
+		int64(len(content)),
+		partialPath,
+		4,
+		progress,
+		"testfile",
+	)
+	downloader.retryDelay = 10 * time.Millisecond
 
 	err := downloader.Download(context.Background())
 	if err == nil {
-		t.Fatal("expected error on short read, got nil")
+		t.Fatal("expected error when every range request fails, got nil")
 	}
 
-	if !strings.Contains(err.Error(), "short read") {
-		t.Errorf("expected 'short read' in error, got: %v", err)
+	if !strings.Contains(err.Error(), "all 3 attempts") {
+		t.Errorf("expected 'all 3 attempts' in error, got: %v", err)
 	}
 
-	// State file must still exist so the segment can be retried.
+	// State file must still exist so the segments can be retried.
 	statePath := StatePath(partialPath)
 
 	_, statErr := os.Stat(statePath)
 	if os.IsNotExist(statErr) {
-		t.Error("state file should be preserved after a failed short-read segment")
+		t.Error("state file should be preserved after a failed download")
+	}
+}
+
+// newAbortingServer returns a test server that aborts the connection partway
+// through the body of the first range request, simulating a CDN stream reset.
+func newAbortingServer(t *testing.T, content []byte) *httptest.Server {
+	t.Helper()
+
+	var callCount atomic.Int32
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
+		var start, end int64
+
+		_, err := fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &start, &end)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+
+			return
+		}
+
+		slice := content[start : end+1]
+
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(content)))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+
+		if callCount.Add(1) == 1 {
+			// Send half the body, flush it, then abort the connection.
+			_, _ = w.Write(slice[:len(slice)/2])
+
+			if flusher, ok := w.(http.Flusher); ok {
+				flusher.Flush()
+			}
+
+			panic(http.ErrAbortHandler)
+		}
+
+		_, _ = w.Write(slice)
+	}))
+}
+
+func TestSegmentedDownloadConnectionAbortRecovers(t *testing.T) {
+	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes.
+
+	server := newAbortingServer(t, content)
+	defer server.Close()
+
+	source := storage.NewHTTPSource(server.URL, 30*time.Second)
+
+	dir := t.TempDir()
+	partialPath := filepath.Join(dir, "testfile.partial")
+
+	progress := mpb.New(mpb.WithOutput(io.Discard))
+
+	downloader := NewDownloader(
+		source,
+		int64(len(content)),
+		partialPath,
+		4,
+		progress,
+		"testfile",
+	)
+	downloader.retryDelay = 10 * time.Millisecond
+
+	err := downloader.Download(context.Background())
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+
+	progress.Wait()
+
+	got, err := os.ReadFile(partialPath)
+	if err != nil {
+		t.Fatalf("reading result: %v", err)
+	}
+
+	if string(got) != string(content) {
+		t.Errorf("content mismatch: got %d bytes, want %d bytes", len(got), len(content))
 	}
 }
 
@@ -327,35 +485,36 @@ func TestSegmentedDownloadShortReadOneSegment(t *testing.T) {
 		progress,
 		"testfile",
 	)
+	downloader.retryDelay = 10 * time.Millisecond
 
 	err := downloader.Download(context.Background())
-	if err == nil {
-		t.Fatal("expected error when one segment has a short read, got nil")
+	if err != nil {
+		t.Fatalf("Download: %v", err)
 	}
 
-	if !strings.Contains(err.Error(), "short read") {
-		t.Errorf("expected 'short read' in error, got: %v", err)
+	progress.Wait()
+
+	got, err := os.ReadFile(partialPath)
+	if err != nil {
+		t.Fatalf("reading result: %v", err)
 	}
 
-	// The successfully-completed segments must remain marked Done in the state,
-	// so a subsequent retry skips them.
+	if string(got) != string(content) {
+		t.Errorf("content mismatch: got %d bytes, want %d bytes", len(got), len(content))
+	}
+
+	// All segments must be marked Done in the preserved state file.
 	statePath := StatePath(partialPath)
 
 	state, loadErr := LoadState(statePath)
 	if loadErr != nil {
-		t.Fatalf("loading state after short-read failure: %v", loadErr)
+		t.Fatalf("loading state after download: %v", loadErr)
 	}
-
-	doneCount := 0
 
 	for _, seg := range state.Segments {
-		if seg.Done {
-			doneCount++
+		if !seg.Done {
+			t.Errorf("segment %d not marked Done after successful download", seg.Index)
 		}
-	}
-
-	if doneCount == 0 {
-		t.Error("expected at least one segment to be marked Done after partial success")
 	}
 }
 

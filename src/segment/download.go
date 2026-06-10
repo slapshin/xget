@@ -7,10 +7,16 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"xget/src/storage"
 
 	"github.com/vbauerster/mpb/v8"
+)
+
+const (
+	defaultSegmentAttempts   = 3
+	defaultSegmentRetryDelay = time.Second
 )
 
 // Downloader performs segmented parallel downloads of a single file.
@@ -22,6 +28,8 @@ type Downloader struct {
 	progress     *mpb.Progress
 	fileName     string
 	stateMu      sync.Mutex
+	attempts     int
+	retryDelay   time.Duration
 }
 
 // NewDownloader creates a new segmented Downloader.
@@ -40,6 +48,8 @@ func NewDownloader(
 		segmentCount: segmentCount,
 		progress:     progress,
 		fileName:     fileName,
+		attempts:     defaultSegmentAttempts,
+		retryDelay:   defaultSegmentRetryDelay,
 	}
 }
 
@@ -164,36 +174,78 @@ func (downloader *Downloader) downloadSegment(
 	state *State,
 	statePath string,
 ) error {
-	reader, err := downloader.source.DownloadRange(ctx, seg.Start, seg.End)
+	expectedBytes := seg.End - seg.Start + 1
+
+	var written int64
+
+	var lastErr error
+
+	// Transient mid-stream failures (e.g. CDN connection resets) are retried
+	// here, resuming from the bytes already written instead of failing the
+	// whole file.
+	for attempt := 1; attempt <= downloader.attempts; attempt++ {
+		n, err := downloader.transferSegment(ctx, seg, file, progressWriter, written)
+		written += n
+
+		if err == nil && written == expectedBytes {
+			return downloader.markSegmentDone(seg, state, statePath)
+		}
+
+		if err == nil {
+			err = fmt.Errorf("short read: expected %d bytes, got %d", expectedBytes, written)
+		}
+
+		lastErr = err
+
+		if ctx.Err() != nil {
+			return lastErr
+		}
+
+		if attempt < downloader.attempts {
+			time.Sleep(downloader.retryDelay)
+		}
+	}
+
+	return fmt.Errorf("all %d attempts: %w", downloader.attempts, lastErr)
+}
+
+// transferSegment downloads the remaining bytes of the segment, starting after
+// the already-written prefix, and returns the number of bytes transferred.
+func (downloader *Downloader) transferSegment(
+	ctx context.Context,
+	seg *Segment,
+	file *os.File,
+	progressWriter *SharedProgressWriter,
+	written int64,
+) (int64, error) {
+	reader, err := downloader.source.DownloadRange(ctx, seg.Start+written, seg.End)
 	if err != nil {
-		return fmt.Errorf("downloading range: %w", err)
+		return 0, fmt.Errorf("downloading range: %w", err)
 	}
 
 	defer reader.Close()
 
-	offsetWriter := io.NewOffsetWriter(file, seg.Start)
-
-	expectedBytes := seg.End - seg.Start + 1
+	offsetWriter := io.NewOffsetWriter(file, seg.Start+written)
 
 	n, err := io.Copy(io.MultiWriter(offsetWriter, progressWriter), reader)
 	if err != nil {
 		if errors.Is(err, io.ErrUnexpectedEOF) {
-			return fmt.Errorf("short read: expected %d bytes, got %d", expectedBytes, n)
+			return n, fmt.Errorf("short read: %w", err)
 		}
 
-		return fmt.Errorf("writing segment: %w", err)
+		return n, fmt.Errorf("writing segment: %w", err)
 	}
 
-	if n != expectedBytes {
-		return fmt.Errorf("short read: expected %d bytes, got %d", expectedBytes, n)
-	}
+	return n, nil
+}
 
+func (downloader *Downloader) markSegmentDone(seg *Segment, state *State, statePath string) error {
 	downloader.stateMu.Lock()
 	defer downloader.stateMu.Unlock()
 
 	seg.Done = true
 
-	err = SaveState(statePath, state)
+	err := SaveState(statePath, state)
 	if err != nil {
 		return fmt.Errorf("saving state: %w", err)
 	}

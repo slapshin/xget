@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,9 +23,24 @@ type HTTPSource struct {
 
 // NewHTTPSource creates an HTTPSource for the given URL and timeout.
 func NewHTTPSource(url string, timeout time.Duration) *HTTPSource {
+	// Force HTTP/1.1: some CDNs (e.g. Cloudflare) reset multiplexed HTTP/2
+	// streams under concurrent range-request load (RST_STREAM INTERNAL_ERROR).
+	// With HTTP/1.1 each range request gets its own connection.
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		baseTransport = &http.Transport{}
+	}
+
+	transport := baseTransport.Clone()
+	transport.ForceAttemptHTTP2 = false
+	transport.TLSNextProto = map[string]func(string, *tls.Conn) http.RoundTripper{}
+
 	return &HTTPSource{
-		url:    url,
-		client: &http.Client{Timeout: timeout},
+		url: url,
+		client: &http.Client{
+			Timeout:   timeout,
+			Transport: transport,
+		},
 	}
 }
 
