@@ -6,20 +6,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 // HTTPSource implements Source for HTTP/HTTPS URLs.
 type HTTPSource struct {
 	url              string
-	http1Client      *http.Client
-	fallbackClient   *http.Client
-	http1Unsupported atomic.Bool
+	client           *http.Client
 	rangeOnce        sync.Once
 	acceptsRangesVal bool
 	acceptsRangesErr error
@@ -32,7 +28,7 @@ func NewHTTPSource(url string, timeout time.Duration) *HTTPSource {
 		baseTransport = &http.Transport{}
 	}
 
-	// Force HTTP/1.1: some CDNs (e.g. Cloudflare) reset multiplexed HTTP/2
+	// Force HTTP/1.1: some CDNs (e.g. Cloudflare R2) reset multiplexed HTTP/2
 	// streams under concurrent range-request load (RST_STREAM INTERNAL_ERROR).
 	// With HTTP/1.1 each range request gets its own connection.
 	http1Transport := baseTransport.Clone()
@@ -41,56 +37,11 @@ func NewHTTPSource(url string, timeout time.Duration) *HTTPSource {
 
 	return &HTTPSource{
 		url: url,
-		http1Client: &http.Client{
+		client: &http.Client{
 			Timeout:   timeout,
 			Transport: http1Transport,
 		},
-		// Keeps protocol negotiation enabled for HTTP/2-only servers.
-		fallbackClient: &http.Client{
-			Timeout:   timeout,
-			Transport: baseTransport.Clone(),
-		},
 	}
-}
-
-// doRequest sends the request with the HTTP/1.1 client and retries with the
-// HTTP/2-capable client when the server cannot speak HTTP/1.1.
-func (httpSource *HTTPSource) doRequest(req *http.Request) (*http.Response, error) {
-	if httpSource.http1Unsupported.Load() {
-		return httpSource.fallbackClient.Do(req)
-	}
-
-	// Clone for the retry: a request must not be reused after Do. The body is
-	// shared by Clone, so callers must send bodyless requests (all do).
-	retryReq := req.Clone(req.Context())
-
-	resp, err := httpSource.http1Client.Do(req)
-	if err == nil || !isHTTP2PrefaceError(err) {
-		return resp, err
-	}
-
-	if httpSource.http1Unsupported.CompareAndSwap(false, true) {
-		fmt.Fprintf(os.Stderr, "warning: %s: server does not support http/1.1, using single stream mode\n",
-			httpSource.url)
-	}
-
-	return httpSource.fallbackClient.Do(retryReq)
-}
-
-// isHTTP2PrefaceError reports whether the error indicates a server that only
-// speaks HTTP/2: either it answered an HTTP/1.x request with raw HTTP/2
-// frames, or the TLS handshake failed because no common protocol was found.
-// String matching is the only option here: net/http and crypto/tls return
-// unexported error types with no sentinel for errors.Is/errors.As.
-func isHTTP2PrefaceError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	message := err.Error()
-
-	return strings.Contains(message, "malformed HTTP response") ||
-		strings.Contains(message, "no application protocol")
 }
 
 // Download retrieves the file content starting from the given offset.
@@ -105,7 +56,7 @@ func (httpSource *HTTPSource) Download(ctx context.Context, offset int64) (io.Re
 		req.Header.Set("Range", fmt.Sprintf("bytes=%d-", offset))
 	}
 
-	resp, err := httpSource.doRequest(req)
+	resp, err := httpSource.client.Do(req)
 	if err != nil {
 		return nil, 0, fmt.Errorf("executing request: %w", err)
 	}
@@ -150,7 +101,7 @@ func (httpSource *HTTPSource) GetSize(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("creating HEAD request: %w", err)
 	}
 
-	resp, err := httpSource.doRequest(req)
+	resp, err := httpSource.client.Do(req)
 	if err != nil {
 		return 0, fmt.Errorf("executing HEAD request: %w", err)
 	}
@@ -183,7 +134,7 @@ func (httpSource *HTTPSource) DownloadRange(ctx context.Context, start, end int6
 
 	req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
 
-	resp, err := httpSource.doRequest(req)
+	resp, err := httpSource.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
@@ -247,7 +198,7 @@ func (httpSource *HTTPSource) AcceptsRanges(ctx context.Context) (bool, error) {
 			return
 		}
 
-		resp, err := httpSource.doRequest(req)
+		resp, err := httpSource.client.Do(req)
 		if err != nil {
 			httpSource.acceptsRangesErr = fmt.Errorf("executing HEAD request: %w", err)
 
@@ -259,14 +210,6 @@ func (httpSource *HTTPSource) AcceptsRanges(ctx context.Context) (bool, error) {
 		acceptRanges := resp.Header.Get("Accept-Ranges")
 		httpSource.acceptsRangesVal = strings.EqualFold(acceptRanges, "bytes")
 	})
-
-	// Parallel range requests need one HTTP/1.1 connection per segment; on an
-	// HTTP/2-only server they would share a single multiplexed connection, so
-	// report no range support to force single stream mode. Any probe error is
-	// deliberately dropped: single stream is the decisive answer either way.
-	if httpSource.http1Unsupported.Load() {
-		return false, nil
-	}
 
 	return httpSource.acceptsRangesVal, httpSource.acceptsRangesErr
 }
