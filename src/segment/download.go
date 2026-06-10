@@ -78,6 +78,7 @@ func (downloader *Downloader) Download(ctx context.Context) error {
 
 	// Create shared progress writer.
 	progressWriter := NewSharedProgressWriter(downloader.progress, downloader.totalSize, downloader.fileName)
+	defer progressWriter.Abort()
 
 	completedBytes := state.CompletedBytes()
 	if completedBytes > 0 {

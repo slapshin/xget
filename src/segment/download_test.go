@@ -338,6 +338,54 @@ func TestSegmentedDownloadExhaustsRetries(t *testing.T) {
 	}
 }
 
+// A failed download must abort its progress bar; otherwise the mpb container's
+// Wait blocks forever on the incomplete bar and the program freezes after all
+// downloads finish.
+func TestSegmentedDownloadFailureUnblocksProgressWait(t *testing.T) {
+	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes.
+
+	server := newEmptyRangeServer(t, content)
+	defer server.Close()
+
+	source := storage.NewHTTPSource(server.URL, 30*time.Second)
+
+	dir := t.TempDir()
+	partialPath := filepath.Join(dir, "testfile.partial")
+
+	progress := mpb.New(mpb.WithOutput(io.Discard))
+
+	downloader := NewDownloader(
+		source,
+		int64(len(content)),
+		partialPath,
+		4,
+		progress,
+		"testfile",
+	)
+	downloader.retryDelay = 10 * time.Millisecond
+
+	err := downloader.Download(context.Background())
+	if err == nil {
+		t.Fatal("expected error when every range request fails, got nil")
+	}
+
+	waitDone := make(chan struct{})
+
+	go func() {
+		progress.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+	case <-time.After(5 * time.Second):
+		// Force-shutdown the container so the Wait goroutine does not leak.
+		progress.Shutdown()
+
+		t.Fatal("progress.Wait() did not return after a failed download (leaked progress bar)")
+	}
+}
+
 // newAbortingServer returns a test server that aborts the connection partway
 // through the body of the first range request, simulating a CDN stream reset.
 func newAbortingServer(t *testing.T, content []byte) *httptest.Server {

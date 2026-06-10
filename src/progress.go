@@ -68,3 +68,10 @@ func (progressWriter *ProgressWriter) SetCurrent(current int64) {
 func (progressWriter *ProgressWriter) Finish() {
 	progressWriter.bar.SetTotal(-1, true)
 }
+
+// Abort terminates the bar so the mpb container's Wait does not block on an
+// incomplete bar after a download error. It is a no-op once the bar has
+// completed, so it is safe to defer right after creation.
+func (progressWriter *ProgressWriter) Abort() {
+	progressWriter.bar.Abort(true)
+}

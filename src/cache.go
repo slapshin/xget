@@ -70,6 +70,7 @@ func (cache *Cache) Get(ctx context.Context, sha256Hash, destPath string, progre
 	defer file.Close()
 
 	progressWriter := NewProgressWriter(progress, totalSize, "[cache] "+destPath)
+	defer progressWriter.Abort()
 
 	// Copy content.
 	_, err = io.Copy(io.MultiWriter(file, progressWriter), reader)

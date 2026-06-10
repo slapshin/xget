@@ -347,6 +347,7 @@ func (downloader *Downloader) performDownload(
 	defer reader.Close()
 
 	progressWriter := NewProgressWriter(progressContainer, totalSize, file.Dest)
+	defer progressWriter.Abort()
 
 	if offset > 0 {
 		progressWriter.SetCurrent(offset)
