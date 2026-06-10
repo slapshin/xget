@@ -828,6 +828,7 @@ func TestSettingsEnvVarExpansion(t *testing.T) {
 	t.Setenv("TIMEOUT", "30m")
 	t.Setenv("SEGMENTS", "6")
 	t.Setenv("SEGMENT_MIN", "20971520")
+	t.Setenv("SINGLE_STREAM", "true")
 
 	cfg, err := parseConfigs(t, []string{`
 settings:
@@ -837,6 +838,7 @@ settings:
   timeout: ${TIMEOUT}
   segments_per_file: ${SEGMENTS}
   segment_min_size: ${SEGMENT_MIN}
+  single_stream: ${SINGLE_STREAM}
 
 files:
   - url: http://example.com/file1.txt
@@ -870,6 +872,10 @@ files:
 	if cfg.Settings.SegmentMinSize != 20971520 {
 		t.Errorf("expected segment_min_size 20971520, got %d", cfg.Settings.SegmentMinSize)
 	}
+
+	if !cfg.Settings.IsSingleStream() {
+		t.Errorf("expected single_stream true, got %q", cfg.Settings.SingleStream)
+	}
 }
 
 func TestSettingsLiteralValues(t *testing.T) {
@@ -878,6 +884,7 @@ settings:
   parallel: 5
   retries: 4
   retry_delay: 10s
+  single_stream: true
 
 files:
   - url: http://example.com/file1.txt
@@ -898,6 +905,89 @@ files:
 
 	if cfg.Settings.RetryDelay != 10*time.Second {
 		t.Errorf("expected retry_delay 10s, got %v", cfg.Settings.RetryDelay)
+	}
+
+	if !cfg.Settings.IsSingleStream() {
+		t.Errorf("expected single_stream true, got %q", cfg.Settings.SingleStream)
+	}
+}
+
+func TestSettingsIsSingleStream(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "true", value: "true", want: true},
+		{name: "uppercase true", value: "TRUE", want: true},
+		{name: "yes", value: "yes", want: true},
+		{name: "one", value: "1", want: true},
+		{name: "false", value: "false", want: false},
+		{name: "empty", value: "", want: false},
+		{name: "garbage", value: "enabled", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := Settings{SingleStream: tt.value}
+
+			if settings.IsSingleStream() != tt.want {
+				t.Errorf("IsSingleStream() with %q: expected %v", tt.value, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseMultiple_SingleStreamOverride(t *testing.T) {
+	tests := []struct {
+		name    string
+		configs []string
+		want    string
+	}{
+		{
+			name: "later config overrides base",
+			configs: []string{
+				"settings:\n  single_stream: \"false\"\n",
+				"settings:\n  single_stream: \"true\"\n",
+			},
+			want: "true",
+		},
+		{
+			name: "unset value does not override",
+			configs: []string{
+				"settings:\n  single_stream: \"true\"\n",
+				"settings:\n  parallel: 2\n",
+			},
+			want: "true",
+		},
+		{
+			name: "explicit false overrides true",
+			configs: []string{
+				"settings:\n  single_stream: \"true\"\n",
+				"settings:\n  single_stream: \"false\"\n",
+			},
+			want: "false",
+		},
+	}
+
+	filesConfig := `
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := parseConfigs(t, append(tt.configs, filesConfig))
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+
+			if cfg.Settings.SingleStream != tt.want {
+				t.Errorf("expected single_stream %q, got %q", tt.want, cfg.Settings.SingleStream)
+			}
+		})
 	}
 }
 

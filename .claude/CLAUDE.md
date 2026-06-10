@@ -85,7 +85,8 @@ Worker pool pattern using semaphore channel limits concurrent downloads.
 ### Segmented Download (`src/segment/`)
 
 Splits a single large file into N byte-range segments downloaded in parallel
-(controlled by `settings.segments_per_file` and `settings.segment_min_size`):
+(controlled by `settings.segments_per_file` and `settings.segment_min_size`;
+disabled entirely by `settings.single_stream: true`):
 
 - **download.go**: `NewDownloader(...)` / `Download()` — orchestrates per-segment range requests; invoked from `src/downloader.go`.
 - **state.go**: persistent resume state in a `.state` file alongside `.partial` (`StatePath()`, `LoadState()`, `SaveState()`); tracks completed segments so interrupted downloads resume per-segment.
