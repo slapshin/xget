@@ -32,6 +32,7 @@ settings:
   parallel: 4           # max concurrent downloads
   retries: 3            # retry attempts on failure
   retry_delay: 5s       # delay between retries
+  timeout: 60s            # per-download timeout
 
 # Files to download
 files:

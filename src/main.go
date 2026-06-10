@@ -56,6 +56,8 @@ func run() int {
 		fmt.Printf("Loaded config with %d files to download\n", len(cfg.Files))
 	}
 
+	printConfig(*cfg)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

@@ -9,7 +9,7 @@
       "program": "${workspaceFolder}/src",
       "cwd": "${workspaceFolder}",
       "args": [
-        "tmp/config.yaml"
+        "config.yaml"
       ],
       "env": {
         "MODELS_DIR": "/Users/slapshin/Develop/projects/my/xget/tmp/models"
