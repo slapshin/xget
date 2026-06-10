@@ -64,11 +64,22 @@ Unset `${VAR}` references are left as the literal `${VAR}` text (not emptied) �
 
 The `Source` interface abstracts download sources:
 
-- **HTTPSource**: Downloads from HTTP/HTTPS URLs with Range request support
+- **HTTPSource**: Downloads from HTTP/HTTPS URLs with Range request support.
+  Deliberately HTTP/1.1-only (like `curl --http1.1`): Cloudflare R2 resets
+  multiplexed HTTP/2 streams under concurrent range load. Do not re-enable
+  HTTP/2 or remove the `TLSClientConfig.NextProtos = ["http/1.1"]` scrub —
+  `Transport.Clone()` of `http.DefaultTransport` leaves "h2" in the cloned
+  ALPN list, so disabling `TLSNextProto` alone is NOT enough (servers still
+  negotiate h2 → "malformed HTTP response"). Regression test:
+  `TestHTTPSourceUsesHTTP1AgainstHTTP2Server`.
 - **S3Source**: Downloads from S3/MinIO using AWS SDK v2
   - Parses URLs as `s3://alias/path` where alias references a configured storage endpoint
   - Supports path-style URLs (required for MinIO)
   - Handles optional key prefixes from alias configuration
+  - Uses the AWS SDK default HTTP client, which offers h2 in ALPN. Works with
+    R2 today only because `r2.cloudflarestorage.com` offers http/1.1-only; if
+    HTTP/2 errors ever appear on `s3://` aliases, force HTTP/1.1 in
+    `createS3Client` the same way.
 
 ### Download Manager (`src/downloader.go`)
 
