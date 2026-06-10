@@ -48,11 +48,15 @@ The application uses YAML config files (see `config.yaml.template` for full exam
 - **settings**: Download behavior (parallel, retries, retry_delay)
 - **files**: List of files to download with URLs, destinations, and SHA256 checksums
 
+Every file entry requires `url`, `dest`, and `sha256` — config validation (`src/config/config.go`) rejects entries missing any of them, so test configs need a dummy `sha256`.
+
 Config supports environment variable expansion using `${VAR_NAME}` syntax in:
 
 - Alias credentials and configuration fields
 - Cache enabled flag
 - File destination paths
+
+Unset `${VAR}` references are left as the literal `${VAR}` text (not emptied) — see `expandEnvVars` in `src/config/env.go`. A masked credential showing a `}` tail usually means its env var wasn't exported.
 
 ## Architecture
 
