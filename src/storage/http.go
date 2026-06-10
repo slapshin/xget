@@ -123,13 +123,53 @@ func (httpSource *HTTPSource) DownloadRange(ctx context.Context, start, end int6
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
 
-	if resp.StatusCode != http.StatusPartialContent {
-		resp.Body.Close()
-
-		return nil, fmt.Errorf("unexpected status code: %d (expected 206)", resp.StatusCode)
+	if resp.StatusCode == http.StatusPartialContent {
+		return resp.Body, nil
 	}
 
-	return resp.Body, nil
+	// Some CDNs (e.g. Cloudflare on a cache miss) ignore the Range header and
+	// return 200 with the full body. Skip the prefix and cap the body so the
+	// caller still receives exactly the requested range.
+	if resp.StatusCode == http.StatusOK {
+		if start > 0 {
+			_, err = io.CopyN(io.Discard, resp.Body, start)
+			if err != nil {
+				resp.Body.Close()
+
+				return nil, fmt.Errorf("discarding %d bytes before range start: %w", start, err)
+			}
+		}
+
+		return newLimitedReadCloser(resp.Body, end-start+1), nil
+	}
+
+	resp.Body.Close()
+
+	return nil, fmt.Errorf("unexpected status code: %d (expected 206)", resp.StatusCode)
+}
+
+// limitedReadCloser reads at most a fixed number of bytes from the underlying
+// body while closing the full response body on Close.
+type limitedReadCloser struct {
+	reader io.Reader
+	body   io.Closer
+}
+
+func newLimitedReadCloser(body io.ReadCloser, limit int64) io.ReadCloser {
+	return &limitedReadCloser{
+		reader: io.LimitReader(body, limit),
+		body:   body,
+	}
+}
+
+// Read reads from the limited range body.
+func (limited *limitedReadCloser) Read(p []byte) (int, error) {
+	return limited.reader.Read(p)
+}
+
+// Close closes the underlying response body.
+func (limited *limitedReadCloser) Close() error {
+	return limited.body.Close()
 }
 
 // AcceptsRanges reports whether the server accepts Range requests.
