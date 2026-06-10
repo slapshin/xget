@@ -821,6 +821,127 @@ files:
 	}
 }
 
+func TestSettingsEnvVarExpansion(t *testing.T) {
+	t.Setenv("DOWNLOAD_PARALLEL", "8")
+	t.Setenv("RETRIES", "7")
+	t.Setenv("RETRY_DELAY", "2s")
+	t.Setenv("TIMEOUT", "30m")
+	t.Setenv("SEGMENTS", "6")
+	t.Setenv("SEGMENT_MIN", "20971520")
+
+	cfg, err := parseConfigs(t, []string{`
+settings:
+  parallel: ${DOWNLOAD_PARALLEL}
+  retries: ${RETRIES}
+  retry_delay: ${RETRY_DELAY}
+  timeout: ${TIMEOUT}
+  segments_per_file: ${SEGMENTS}
+  segment_min_size: ${SEGMENT_MIN}
+
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Settings.Parallel != 8 {
+		t.Errorf("expected parallel 8, got %d", cfg.Settings.Parallel)
+	}
+
+	if cfg.Settings.Retries != 7 {
+		t.Errorf("expected retries 7, got %d", cfg.Settings.Retries)
+	}
+
+	if cfg.Settings.RetryDelay != 2*time.Second {
+		t.Errorf("expected retry_delay 2s, got %v", cfg.Settings.RetryDelay)
+	}
+
+	if cfg.Settings.Timeout != 30*time.Minute {
+		t.Errorf("expected timeout 30m, got %v", cfg.Settings.Timeout)
+	}
+
+	if cfg.Settings.SegmentsPerFile != 6 {
+		t.Errorf("expected segments_per_file 6, got %d", cfg.Settings.SegmentsPerFile)
+	}
+
+	if cfg.Settings.SegmentMinSize != 20971520 {
+		t.Errorf("expected segment_min_size 20971520, got %d", cfg.Settings.SegmentMinSize)
+	}
+}
+
+func TestSettingsLiteralValues(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{`
+settings:
+  parallel: 5
+  retries: 4
+  retry_delay: 10s
+
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Settings.Parallel != 5 {
+		t.Errorf("expected parallel 5, got %d", cfg.Settings.Parallel)
+	}
+
+	if cfg.Settings.Retries != 4 {
+		t.Errorf("expected retries 4, got %d", cfg.Settings.Retries)
+	}
+
+	if cfg.Settings.RetryDelay != 10*time.Second {
+		t.Errorf("expected retry_delay 10s, got %v", cfg.Settings.RetryDelay)
+	}
+}
+
+func TestSettingsEmptyValuesUseDefaults(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{`
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Settings.Parallel != defaultParallel {
+		t.Errorf("expected parallel %d, got %d", defaultParallel, cfg.Settings.Parallel)
+	}
+
+	if cfg.Settings.RetryDelay != defaultRetryDelay {
+		t.Errorf("expected retry_delay %v, got %v", defaultRetryDelay, cfg.Settings.RetryDelay)
+	}
+}
+
+func TestSettingsInvalidValueReturnsError(t *testing.T) {
+	t.Setenv("PARALLEL", "not-a-number")
+
+	_, err := parseConfigs(t, []string{`
+settings:
+  parallel: ${PARALLEL}
+
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`})
+	if err == nil {
+		t.Fatal("expected error for unparseable parallel, got nil")
+	}
+
+	if !strings.Contains(err.Error(), "settings.parallel") {
+		t.Errorf("expected error mentioning settings.parallel, got %v", err)
+	}
+}
+
 func TestFileEntryEnvVarNotExpanded(t *testing.T) {
 	cfg, err := parseConfigs(t, []string{`
 aliases:

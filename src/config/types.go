@@ -1,8 +1,12 @@
 package config
 
 import (
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 // Config represents the root configuration structure.
@@ -54,6 +58,110 @@ type Settings struct {
 	Timeout        time.Duration `yaml:"timeout"`
 	SegmentsPerFile int          `yaml:"segments_per_file"`
 	SegmentMinSize  int64        `yaml:"segment_min_size"`
+}
+
+// UnmarshalYAML expands ${VAR} env vars in each setting before parsing it into
+// the typed field. Empty values are left as the zero value so defaults apply.
+func (settings *Settings) UnmarshalYAML(value *yaml.Node) error {
+	// raw mirrors Settings with all fields as strings so each value can be
+	// env-expanded before parsing into the typed field. Keep in sync with Settings.
+	var raw struct {
+		Parallel        string `yaml:"parallel"`
+		Retries         string `yaml:"retries"`
+		RetryDelay      string `yaml:"retry_delay"`
+		Timeout         string `yaml:"timeout"`
+		SegmentsPerFile string `yaml:"segments_per_file"`
+		SegmentMinSize  string `yaml:"segment_min_size"`
+	}
+
+	err := value.Decode(&raw)
+	if err != nil {
+		return fmt.Errorf("decoding settings: %w", err)
+	}
+
+	err = parseIntSetting("parallel", raw.Parallel, &settings.Parallel)
+	if err != nil {
+		return err
+	}
+
+	err = parseIntSetting("retries", raw.Retries, &settings.Retries)
+	if err != nil {
+		return err
+	}
+
+	err = parseIntSetting("segments_per_file", raw.SegmentsPerFile, &settings.SegmentsPerFile)
+	if err != nil {
+		return err
+	}
+
+	err = parseInt64Setting("segment_min_size", raw.SegmentMinSize, &settings.SegmentMinSize)
+	if err != nil {
+		return err
+	}
+
+	err = parseDurationSetting("retry_delay", raw.RetryDelay, &settings.RetryDelay)
+	if err != nil {
+		return err
+	}
+
+	err = parseDurationSetting("timeout", raw.Timeout, &settings.Timeout)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// parseIntSetting expands env vars in raw and parses it into target.
+// An empty expanded value leaves target untouched so defaults can apply.
+func parseIntSetting(name, raw string, target *int) error {
+	value := strings.TrimSpace(expandEnvVars(raw))
+	if value == "" {
+		return nil
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("parsing settings.%s %q: %w", name, value, err)
+	}
+
+	*target = parsed
+
+	return nil
+}
+
+// parseInt64Setting expands env vars in raw and parses it into target.
+func parseInt64Setting(name, raw string, target *int64) error {
+	value := strings.TrimSpace(expandEnvVars(raw))
+	if value == "" {
+		return nil
+	}
+
+	parsed, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return fmt.Errorf("parsing settings.%s %q: %w", name, value, err)
+	}
+
+	*target = parsed
+
+	return nil
+}
+
+// parseDurationSetting expands env vars in raw and parses it into target.
+func parseDurationSetting(name, raw string, target *time.Duration) error {
+	value := strings.TrimSpace(expandEnvVars(raw))
+	if value == "" {
+		return nil
+	}
+
+	parsed, err := time.ParseDuration(value)
+	if err != nil {
+		return fmt.Errorf("parsing settings.%s %q: %w", name, value, err)
+	}
+
+	*target = parsed
+
+	return nil
 }
 
 // FileEntry represents a file to download.

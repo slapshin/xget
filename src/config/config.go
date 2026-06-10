@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"time"
 
@@ -169,9 +170,7 @@ func mergeConfigs(base *Config, override *Config) {
 		base.Aliases = make(map[string]Alias)
 	}
 
-	for name, alias := range override.Aliases {
-		base.Aliases[name] = alias
-	}
+	maps.Copy(base.Aliases, override.Aliases)
 
 	// Override cache settings if specified.
 	if override.Cache.Alias != "" {

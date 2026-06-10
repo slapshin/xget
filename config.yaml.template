@@ -28,10 +28,12 @@ cache:
   enabled: true # or use env var: ${CACHE_ENABLED}
 
 # Download settings
+# Each value supports ${VAR} env var substitution (the var must be set, as the
+# expanded value still has to parse as a number or duration).
 settings:
-  parallel: 4 # max concurrent downloads
-  retries: 3 # retry attempts on failure
-  retry_delay: 5s # delay between retries
+  parallel: 4 # max concurrent downloads (or ${PARALLEL})
+  retries: 3 # retry attempts on failure (or ${RETRIES})
+  retry_delay: 5s # delay between retries (or ${RETRY_DELAY})
   segments_per_file: 4 # connections per file (segmented download)
   segment_min_size: 10485760 # minimum file size for segmented download (10MB)
 
