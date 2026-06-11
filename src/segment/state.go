@@ -20,6 +20,14 @@ type Segment struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"`
 	Done  bool  `json:"done"`
+	// Written is the number of contiguous bytes already written from Start.
+	// It lets an interrupted segment resume mid-range instead of restarting.
+	Written int64 `json:"written"`
+}
+
+// Size returns the segment length in bytes.
+func (segment Segment) Size() int64 {
+	return segment.End - segment.Start + 1
 }
 
 // NewState creates a new State by dividing totalSize into count equal segments.
@@ -45,13 +53,16 @@ func NewState(totalSize int64, count int) *State {
 	}
 }
 
-// CompletedBytes returns the total number of bytes in completed segments.
+// CompletedBytes returns the total number of bytes already downloaded,
+// counting completed segments in full and partial progress of the rest.
 func (state *State) CompletedBytes() int64 {
 	var total int64
 
 	for i := range state.Segments {
 		if state.Segments[i].Done {
-			total += state.Segments[i].End - state.Segments[i].Start + 1
+			total += state.Segments[i].Size()
+		} else {
+			total += state.Segments[i].Written
 		}
 	}
 

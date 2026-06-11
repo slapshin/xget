@@ -17,6 +17,7 @@ import (
 const (
 	defaultSegmentAttempts   = 3
 	defaultSegmentRetryDelay = time.Second
+	stateSaveInterval        = time.Second
 )
 
 // Downloader performs segmented parallel downloads of a single file.
@@ -30,6 +31,8 @@ type Downloader struct {
 	stateMu      sync.Mutex
 	attempts     int
 	retryDelay   time.Duration
+	// lastStateSave throttles mid-transfer state saves; guarded by stateMu.
+	lastStateSave time.Time
 }
 
 // NewDownloader creates a new segmented Downloader.
@@ -86,9 +89,22 @@ func (downloader *Downloader) Download(ctx context.Context) error {
 	}
 
 	// Download incomplete segments in parallel.
-	err = downloader.downloadSegments(ctx, state, file, progressWriter, statePath)
-	if err != nil {
-		return err
+	downloadErr := downloader.downloadSegments(ctx, state, file, progressWriter, statePath)
+
+	// Persist final per-segment progress so an interrupted or failed download
+	// resumes mid-segment on the next run.
+	flushErr := downloader.flushState(state, statePath)
+
+	if downloadErr != nil {
+		if flushErr != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save segment state for %s: %v\n", downloader.fileName, flushErr)
+		}
+
+		return downloadErr
+	}
+
+	if flushErr != nil {
+		return flushErr
 	}
 
 	progressWriter.Finish()
@@ -99,6 +115,8 @@ func (downloader *Downloader) Download(ctx context.Context) error {
 func (downloader *Downloader) loadOrCreateState(statePath string) (*State, error) {
 	state, err := LoadState(statePath)
 	if err == nil && state.TotalSize == downloader.totalSize && state.SegmentCount == downloader.segmentCount {
+		sanitizeSegments(state)
+
 		return state, nil
 	}
 
@@ -175,9 +193,22 @@ func (downloader *Downloader) downloadSegment(
 	state *State,
 	statePath string,
 ) error {
-	expectedBytes := seg.End - seg.Start + 1
+	expectedBytes := seg.Size()
 
-	var written int64
+	// Resume from progress persisted by a previous run.
+	written := seg.Written
+	if written >= expectedBytes {
+		// All bytes were written but the process died before the segment was
+		// marked done; requesting a further range would be invalid.
+		return downloader.markSegmentDone(seg, state, statePath)
+	}
+
+	tracker := &segmentTracker{
+		downloader: downloader,
+		seg:        seg,
+		state:      state,
+		statePath:  statePath,
+	}
 
 	var lastErr error
 
@@ -185,7 +216,7 @@ func (downloader *Downloader) downloadSegment(
 	// here, resuming from the bytes already written instead of failing the
 	// whole file.
 	for attempt := 1; attempt <= downloader.attempts; attempt++ {
-		n, err := downloader.transferSegment(ctx, seg, file, progressWriter, written)
+		n, err := downloader.transferSegment(ctx, seg, file, tracker, progressWriter, written)
 		written += n
 
 		if err == nil && written == expectedBytes {
@@ -216,6 +247,7 @@ func (downloader *Downloader) transferSegment(
 	ctx context.Context,
 	seg *Segment,
 	file *os.File,
+	tracker *segmentTracker,
 	progressWriter *SharedProgressWriter,
 	written int64,
 ) (int64, error) {
@@ -228,7 +260,10 @@ func (downloader *Downloader) transferSegment(
 
 	offsetWriter := io.NewOffsetWriter(file, seg.Start+written)
 
-	n, err := io.Copy(io.MultiWriter(offsetWriter, progressWriter), reader)
+	// The tracker must come after offsetWriter: MultiWriter stops at the first
+	// failed writer, so the tracker only counts bytes the file accepted and the
+	// persisted progress never exceeds the data on disk.
+	n, err := io.Copy(io.MultiWriter(offsetWriter, tracker, progressWriter), reader)
 	if err != nil {
 		if errors.Is(err, io.ErrUnexpectedEOF) {
 			return n, fmt.Errorf("short read: %w", err)
@@ -245,6 +280,7 @@ func (downloader *Downloader) markSegmentDone(seg *Segment, state *State, stateP
 	defer downloader.stateMu.Unlock()
 
 	seg.Done = true
+	seg.Written = seg.Size()
 
 	err := SaveState(statePath, state)
 	if err != nil {
@@ -252,4 +288,72 @@ func (downloader *Downloader) markSegmentDone(seg *Segment, state *State, stateP
 	}
 
 	return nil
+}
+
+// flushState persists the current state unconditionally.
+func (downloader *Downloader) flushState(state *State, statePath string) error {
+	downloader.stateMu.Lock()
+	defer downloader.stateMu.Unlock()
+
+	err := SaveState(statePath, state)
+	if err != nil {
+		return fmt.Errorf("saving final state: %w", err)
+	}
+
+	return nil
+}
+
+// sanitizeSegments repairs progress counters loaded from disk so that a stale
+// or hand-edited state file cannot produce invalid range requests.
+func sanitizeSegments(state *State) {
+	for i := range state.Segments {
+		seg := &state.Segments[i]
+
+		switch {
+		case seg.Done:
+			seg.Written = seg.Size()
+		case seg.Written < 0 || seg.Written > seg.Size():
+			// An out-of-range counter means the state file is corrupt; the only
+			// safe recovery is to re-download the whole segment.
+			seg.Written = 0
+		}
+	}
+}
+
+// segmentTracker records bytes written for one segment so its progress can be
+// persisted and resumed across process restarts.
+type segmentTracker struct {
+	downloader *Downloader
+	seg        *Segment
+	state      *State
+	statePath  string
+}
+
+// Write implements io.Writer. It runs after the file writer in the transfer
+// MultiWriter, so every byte counted here is already accepted by the file.
+func (tracker *segmentTracker) Write(data []byte) (int, error) {
+	tracker.recordProgress(int64(len(data)))
+
+	return len(data), nil
+}
+
+// recordProgress advances the segment's persisted progress and saves the state
+// at most once per stateSaveInterval. Save errors are ignored here: a missed
+// throttled save only costs resume granularity, and the final flush in
+// Download surfaces persistent problems.
+func (tracker *segmentTracker) recordProgress(n int64) {
+	downloader := tracker.downloader
+
+	downloader.stateMu.Lock()
+	defer downloader.stateMu.Unlock()
+
+	tracker.seg.Written += n
+
+	if time.Since(downloader.lastStateSave) < stateSaveInterval {
+		return
+	}
+
+	downloader.lastStateSave = time.Now()
+
+	_ = SaveState(tracker.statePath, tracker.state)
 }

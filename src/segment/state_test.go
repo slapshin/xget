@@ -123,6 +123,20 @@ func TestCompletedBytes(t *testing.T) {
 	if got := state.CompletedBytes(); got != 50 {
 		t.Errorf("CompletedBytes() = %d, want 50", got)
 	}
+
+	// Written on a done segment must not be double-counted.
+	state.Segments[0].Written = 25
+
+	if got := state.CompletedBytes(); got != 50 {
+		t.Errorf("CompletedBytes() with Written on done segment = %d, want 50", got)
+	}
+
+	// Partial progress on an unfinished segment counts as written bytes.
+	state.Segments[1].Written = 10
+
+	if got := state.CompletedBytes(); got != 60 {
+		t.Errorf("CompletedBytes() with partial segment = %d, want 60", got)
+	}
 }
 
 func TestSaveLoadState(t *testing.T) {
@@ -131,6 +145,7 @@ func TestSaveLoadState(t *testing.T) {
 
 	original := NewState(1000, 4)
 	original.Segments[0].Done = true
+	original.Segments[1].Written = 123
 	original.Segments[2].Done = true
 
 	err := SaveState(path, original)
@@ -154,9 +169,46 @@ func TestSaveLoadState(t *testing.T) {
 	for i, seg := range loaded.Segments {
 		orig := original.Segments[i]
 
-		if seg.Start != orig.Start || seg.End != orig.End || seg.Done != orig.Done {
+		if seg.Start != orig.Start || seg.End != orig.End || seg.Done != orig.Done || seg.Written != orig.Written {
 			t.Errorf("segment[%d] mismatch: got %+v, want %+v", i, seg, orig)
 		}
+	}
+}
+
+func TestLoadStateBackwardCompat(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "old.segments")
+
+	// State file written by a version without the "written" field.
+	oldJSON := `{"total_size":1000,"segment_count":2,"segments":[` +
+		`{"index":0,"start":0,"end":499,"done":true},` +
+		`{"index":1,"start":500,"end":999,"done":false}]}`
+
+	err := os.WriteFile(path, []byte(oldJSON), 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadState(path)
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+
+	for i, seg := range state.Segments {
+		if seg.Written != 0 {
+			t.Errorf("segment[%d].Written = %d, want 0", i, seg.Written)
+		}
+	}
+
+	// Sanitizing must promote the done segment to fully written.
+	sanitizeSegments(state)
+
+	if got := state.Segments[0].Written; got != 500 {
+		t.Errorf("sanitized done segment Written = %d, want 500", got)
+	}
+
+	if got := state.Segments[1].Written; got != 0 {
+		t.Errorf("sanitized pending segment Written = %d, want 0", got)
 	}
 }
 

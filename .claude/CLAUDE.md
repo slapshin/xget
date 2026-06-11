@@ -100,7 +100,7 @@ Splits a single large file into N byte-range segments downloaded in parallel
 disabled entirely by `settings.single_stream: true`):
 
 - **download.go**: `NewDownloader(...)` / `Download()` — orchestrates per-segment range requests; invoked from `src/downloader.go`.
-- **state.go**: persistent resume state in a `.state` file alongside `.partial` (`StatePath()`, `LoadState()`, `SaveState()`); tracks completed segments so interrupted downloads resume per-segment.
+- **state.go**: persistent resume state in a `.segments` file alongside `.partial` (`StatePath()`, `LoadState()`, `SaveState()`); tracks per-segment byte progress (`Written`, saved on a 1s throttle during transfer plus a final flush) so interrupted downloads resume mid-segment, not just at completed-segment boundaries.
 - **progress.go**: per-segment progress bar wiring.
 
 ### Cache Layer (`src/cache.go`)

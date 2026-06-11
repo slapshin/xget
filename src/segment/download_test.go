@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -564,6 +565,366 @@ func TestSegmentedDownloadShortReadOneSegment(t *testing.T) {
 			t.Errorf("segment %d not marked Done after successful download", seg.Index)
 		}
 	}
+}
+
+// newRangeRecordingServer returns a test server that serves ranges correctly
+// and records the start offset of every range request it receives.
+func newRangeRecordingServer(t *testing.T, content []byte) (*httptest.Server, func() []int64) {
+	t.Helper()
+
+	var mu sync.Mutex
+
+	var starts []int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
+		var start, end int64
+
+		_, err := fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &start, &end)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+
+			return
+		}
+
+		mu.Lock()
+
+		starts = append(starts, start)
+
+		mu.Unlock()
+
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(content)))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(content[start : end+1])
+	}))
+
+	rangeStarts := func() []int64 {
+		mu.Lock()
+		defer mu.Unlock()
+
+		return append([]int64(nil), starts...)
+	}
+
+	return server, rangeStarts
+}
+
+// assertPartialContent fails the test when the partial file does not match the
+// expected content.
+func assertPartialContent(t *testing.T, partialPath string, content []byte) {
+	t.Helper()
+
+	got, err := os.ReadFile(partialPath)
+	if err != nil {
+		t.Fatalf("reading result: %v", err)
+	}
+
+	if string(got) != string(content) {
+		t.Errorf("content mismatch: got %d bytes, want %d bytes", len(got), len(content))
+	}
+}
+
+// assertAllSegmentsDone fails the test when any segment in the state file is
+// not marked done with its full size written.
+func assertAllSegmentsDone(t *testing.T, statePath string) {
+	t.Helper()
+
+	state, err := LoadState(statePath)
+	if err != nil {
+		t.Fatalf("loading final state: %v", err)
+	}
+
+	for _, seg := range state.Segments {
+		if !seg.Done || seg.Written != seg.Size() {
+			t.Errorf("segment %d = {Done:%v Written:%d}, want done with full written", seg.Index, seg.Done, seg.Written)
+		}
+	}
+}
+
+// assertNoSegmentRestart fails the test when any recorded range request starts
+// exactly at a segment boundary, i.e. a segment restarted instead of resuming.
+func assertNoSegmentRestart(t *testing.T, starts []int64, segments []Segment) {
+	t.Helper()
+
+	for _, start := range starts {
+		for _, seg := range segments {
+			if start == seg.Start {
+				t.Errorf("segment %d restarted from its beginning instead of resuming", seg.Index)
+			}
+		}
+	}
+}
+
+// prepareResumeFixture writes a partial file containing the given prefix of
+// content (zero-padded to full size) and saves the given state next to it.
+func prepareResumeFixture(t *testing.T, partialPath string, content []byte, prefixLen int, state *State) {
+	t.Helper()
+
+	file, err := os.Create(partialPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = file.Truncate(int64(len(content)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = file.WriteAt(content[:prefixLen], 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = file.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = SaveState(StatePath(partialPath), state)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSegmentedDownloadResumePartialSegment(t *testing.T) {
+	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes, 2 segments of 500.
+
+	server, rangeStarts := newRangeRecordingServer(t, content)
+	defer server.Close()
+
+	source := storage.NewHTTPSource(server.URL, 30*time.Second)
+
+	dir := t.TempDir()
+	partialPath := filepath.Join(dir, "testfile.partial")
+
+	// Segment 0 fully done, segment 1 interrupted after 100 bytes.
+	state := NewState(int64(len(content)), 2)
+	state.Segments[0].Done = true
+	state.Segments[1].Written = 100
+
+	prepareResumeFixture(t, partialPath, content, 600, state)
+
+	progress := mpb.New(mpb.WithOutput(io.Discard))
+
+	downloader := NewDownloader(
+		source,
+		int64(len(content)),
+		partialPath,
+		2,
+		progress,
+		"testfile",
+	)
+
+	err := downloader.Download(context.Background())
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+
+	progress.Wait()
+
+	assertPartialContent(t, partialPath, content)
+
+	// The interrupted segment must resume mid-range, not from its start.
+	starts := rangeStarts()
+	if len(starts) != 1 || starts[0] != 600 {
+		t.Errorf("range starts = %v, want a single request at 600", starts)
+	}
+
+	assertAllSegmentsDone(t, StatePath(partialPath))
+}
+
+func TestSegmentedDownloadFullyWrittenSegmentSkipsRequest(t *testing.T) {
+	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes, 2 segments of 500.
+
+	server, rangeStarts := newRangeRecordingServer(t, content)
+	defer server.Close()
+
+	source := storage.NewHTTPSource(server.URL, 30*time.Second)
+
+	dir := t.TempDir()
+	partialPath := filepath.Join(dir, "testfile.partial")
+
+	// Segment 0 fully written but the process died before it was marked done.
+	state := NewState(int64(len(content)), 2)
+	state.Segments[0].Written = 500
+
+	prepareResumeFixture(t, partialPath, content, 500, state)
+
+	progress := mpb.New(mpb.WithOutput(io.Discard))
+
+	downloader := NewDownloader(
+		source,
+		int64(len(content)),
+		partialPath,
+		2,
+		progress,
+		"testfile",
+	)
+
+	err := downloader.Download(context.Background())
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+
+	progress.Wait()
+
+	assertPartialContent(t, partialPath, content)
+
+	for _, start := range rangeStarts() {
+		if start < 500 {
+			t.Errorf("fully written segment 0 was re-requested (range start %d)", start)
+		}
+	}
+
+	assertAllSegmentsDone(t, StatePath(partialPath))
+}
+
+// newHalfThenAbortServer returns a test server that sends the first half of
+// every requested range, flushes it, then aborts the connection.
+func newHalfThenAbortServer(t *testing.T, content []byte) *httptest.Server {
+	t.Helper()
+
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.Header().Set("Accept-Ranges", "bytes")
+			w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
+			w.WriteHeader(http.StatusOK)
+
+			return
+		}
+
+		var start, end int64
+
+		_, err := fmt.Sscanf(r.Header.Get("Range"), "bytes=%d-%d", &start, &end)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+
+			return
+		}
+
+		slice := content[start : end+1]
+
+		w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, len(content)))
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", end-start+1))
+		w.WriteHeader(http.StatusPartialContent)
+		_, _ = w.Write(slice[:len(slice)/2])
+
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+
+		panic(http.ErrAbortHandler)
+	}))
+}
+
+func TestSegmentedDownloadFailurePersistsWritten(t *testing.T) {
+	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes, 4 segments of 250.
+
+	abortingServer := newHalfThenAbortServer(t, content)
+	defer abortingServer.Close()
+
+	dir := t.TempDir()
+	partialPath := filepath.Join(dir, "testfile.partial")
+
+	progress := mpb.New(mpb.WithOutput(io.Discard))
+
+	downloader := NewDownloader(
+		storage.NewHTTPSource(abortingServer.URL, 30*time.Second),
+		int64(len(content)),
+		partialPath,
+		4,
+		progress,
+		"testfile",
+	)
+	downloader.retryDelay = 10 * time.Millisecond
+
+	err := downloader.Download(context.Background())
+	if err == nil {
+		t.Fatal("expected error when every range request aborts, got nil")
+	}
+
+	// Partial per-segment progress must survive the failed run.
+	state, err := LoadState(StatePath(partialPath))
+	if err != nil {
+		t.Fatalf("loading state after failed download: %v", err)
+	}
+
+	for _, seg := range state.Segments {
+		if seg.Written <= 0 || seg.Written >= seg.Size() {
+			t.Errorf("segment %d Written = %d, want partial progress in (0, %d)", seg.Index, seg.Written, seg.Size())
+		}
+	}
+
+	// A second run against a healthy server must resume mid-segment.
+	goodServer, rangeStarts := newRangeRecordingServer(t, content)
+	defer goodServer.Close()
+
+	resumeProgress := mpb.New(mpb.WithOutput(io.Discard))
+
+	resumeDownloader := NewDownloader(
+		storage.NewHTTPSource(goodServer.URL, 30*time.Second),
+		int64(len(content)),
+		partialPath,
+		4,
+		resumeProgress,
+		"testfile",
+	)
+
+	err = resumeDownloader.Download(context.Background())
+	if err != nil {
+		t.Fatalf("resumed Download: %v", err)
+	}
+
+	resumeProgress.Wait()
+
+	assertPartialContent(t, partialPath, content)
+	assertNoSegmentRestart(t, rangeStarts(), state.Segments)
+}
+
+func TestSegmentedDownloadSanitizesCorruptWritten(t *testing.T) {
+	content := []byte(strings.Repeat("abcdefghij", 100)) // 1000 bytes, 2 segments of 500.
+
+	server := newTestServer(t, content)
+	defer server.Close()
+
+	source := storage.NewHTTPSource(server.URL, 30*time.Second)
+
+	dir := t.TempDir()
+	partialPath := filepath.Join(dir, "testfile.partial")
+
+	// Corrupt counters: negative on one segment, beyond size on the other.
+	state := NewState(int64(len(content)), 2)
+	state.Segments[0].Written = -5
+	state.Segments[1].Written = 600
+
+	prepareResumeFixture(t, partialPath, content, 0, state)
+
+	progress := mpb.New(mpb.WithOutput(io.Discard))
+
+	downloader := NewDownloader(
+		source,
+		int64(len(content)),
+		partialPath,
+		2,
+		progress,
+		"testfile",
+	)
+
+	err := downloader.Download(context.Background())
+	if err != nil {
+		t.Fatalf("Download: %v", err)
+	}
+
+	progress.Wait()
+
+	assertPartialContent(t, partialPath, content)
 }
 
 func TestSegmentedDownloadTwoSegments(t *testing.T) {
