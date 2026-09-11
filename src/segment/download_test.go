@@ -14,9 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"xget/src/output"
 	"xget/src/storage"
-
-	"github.com/vbauerster/mpb/v8"
 )
 
 func newTestServer(t *testing.T, content []byte) *httptest.Server {
@@ -81,14 +80,14 @@ func TestSegmentedDownload(t *testing.T) {
 	dir := t.TempDir()
 	partialPath := filepath.Join(dir, "testfile.partial")
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		4,
-		progress,
+		reporter,
 		"testfile",
 	)
 
@@ -97,7 +96,7 @@ func TestSegmentedDownload(t *testing.T) {
 		t.Fatalf("Download: %v", err)
 	}
 
-	progress.Wait()
+	reporter.Wait()
 
 	// Verify file content.
 	got, err := os.ReadFile(partialPath)
@@ -160,14 +159,14 @@ func TestSegmentedDownloadResume(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		2,
-		progress,
+		reporter,
 		"testfile",
 	)
 
@@ -176,7 +175,7 @@ func TestSegmentedDownloadResume(t *testing.T) {
 		t.Fatalf("Download: %v", err)
 	}
 
-	progress.Wait()
+	reporter.Wait()
 
 	// Verify file content.
 	got, err := os.ReadFile(partialPath)
@@ -239,14 +238,14 @@ func TestSegmentedDownloadShortReadRecovers(t *testing.T) {
 	dir := t.TempDir()
 	partialPath := filepath.Join(dir, "testfile.partial")
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		4,
-		progress,
+		reporter,
 		"testfile",
 	)
 	downloader.retryDelay = 10 * time.Millisecond
@@ -256,7 +255,7 @@ func TestSegmentedDownloadShortReadRecovers(t *testing.T) {
 		t.Fatalf("Download: %v", err)
 	}
 
-	progress.Wait()
+	reporter.Wait()
 
 	got, err := os.ReadFile(partialPath)
 	if err != nil {
@@ -309,14 +308,14 @@ func TestSegmentedDownloadExhaustsRetries(t *testing.T) {
 	dir := t.TempDir()
 	partialPath := filepath.Join(dir, "testfile.partial")
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		4,
-		progress,
+		reporter,
 		"testfile",
 	)
 	downloader.retryDelay = 10 * time.Millisecond
@@ -353,14 +352,14 @@ func TestSegmentedDownloadFailureUnblocksProgressWait(t *testing.T) {
 	dir := t.TempDir()
 	partialPath := filepath.Join(dir, "testfile.partial")
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		4,
-		progress,
+		reporter,
 		"testfile",
 	)
 	downloader.retryDelay = 10 * time.Millisecond
@@ -373,17 +372,14 @@ func TestSegmentedDownloadFailureUnblocksProgressWait(t *testing.T) {
 	waitDone := make(chan struct{})
 
 	go func() {
-		progress.Wait()
+		reporter.Wait()
 		close(waitDone)
 	}()
 
 	select {
 	case <-waitDone:
 	case <-time.After(5 * time.Second):
-		// Force-shutdown the container so the Wait goroutine does not leak.
-		progress.Shutdown()
-
-		t.Fatal("progress.Wait() did not return after a failed download (leaked progress bar)")
+		t.Fatal("reporter.Wait() did not return after a failed download (leaked progress bar)")
 	}
 }
 
@@ -444,14 +440,14 @@ func TestSegmentedDownloadConnectionAbortRecovers(t *testing.T) {
 	dir := t.TempDir()
 	partialPath := filepath.Join(dir, "testfile.partial")
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		4,
-		progress,
+		reporter,
 		"testfile",
 	)
 	downloader.retryDelay = 10 * time.Millisecond
@@ -461,7 +457,7 @@ func TestSegmentedDownloadConnectionAbortRecovers(t *testing.T) {
 		t.Fatalf("Download: %v", err)
 	}
 
-	progress.Wait()
+	reporter.Wait()
 
 	got, err := os.ReadFile(partialPath)
 	if err != nil {
@@ -524,14 +520,14 @@ func TestSegmentedDownloadShortReadOneSegment(t *testing.T) {
 	dir := t.TempDir()
 	partialPath := filepath.Join(dir, "testfile.partial")
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		4,
-		progress,
+		reporter,
 		"testfile",
 	)
 	downloader.retryDelay = 10 * time.Millisecond
@@ -541,7 +537,7 @@ func TestSegmentedDownloadShortReadOneSegment(t *testing.T) {
 		t.Fatalf("Download: %v", err)
 	}
 
-	progress.Wait()
+	reporter.Wait()
 
 	got, err := os.ReadFile(partialPath)
 	if err != nil {
@@ -711,14 +707,14 @@ func TestSegmentedDownloadResumePartialSegment(t *testing.T) {
 
 	prepareResumeFixture(t, partialPath, content, 600, state)
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		2,
-		progress,
+		reporter,
 		"testfile",
 	)
 
@@ -727,7 +723,7 @@ func TestSegmentedDownloadResumePartialSegment(t *testing.T) {
 		t.Fatalf("Download: %v", err)
 	}
 
-	progress.Wait()
+	reporter.Wait()
 
 	assertPartialContent(t, partialPath, content)
 
@@ -757,14 +753,14 @@ func TestSegmentedDownloadFullyWrittenSegmentSkipsRequest(t *testing.T) {
 
 	prepareResumeFixture(t, partialPath, content, 500, state)
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		2,
-		progress,
+		reporter,
 		"testfile",
 	)
 
@@ -773,7 +769,7 @@ func TestSegmentedDownloadFullyWrittenSegmentSkipsRequest(t *testing.T) {
 		t.Fatalf("Download: %v", err)
 	}
 
-	progress.Wait()
+	reporter.Wait()
 
 	assertPartialContent(t, partialPath, content)
 
@@ -833,14 +829,14 @@ func TestSegmentedDownloadFailurePersistsWritten(t *testing.T) {
 	dir := t.TempDir()
 	partialPath := filepath.Join(dir, "testfile.partial")
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		storage.NewHTTPSource(abortingServer.URL, 30*time.Second),
 		int64(len(content)),
 		partialPath,
 		4,
-		progress,
+		reporter,
 		"testfile",
 	)
 	downloader.retryDelay = 10 * time.Millisecond
@@ -849,6 +845,8 @@ func TestSegmentedDownloadFailurePersistsWritten(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when every range request aborts, got nil")
 	}
+
+	reporter.Wait()
 
 	// Partial per-segment progress must survive the failed run.
 	state, err := LoadState(StatePath(partialPath))
@@ -866,14 +864,14 @@ func TestSegmentedDownloadFailurePersistsWritten(t *testing.T) {
 	goodServer, rangeStarts := newRangeRecordingServer(t, content)
 	defer goodServer.Close()
 
-	resumeProgress := mpb.New(mpb.WithOutput(io.Discard))
+	resumeReporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	resumeDownloader := NewDownloader(
 		storage.NewHTTPSource(goodServer.URL, 30*time.Second),
 		int64(len(content)),
 		partialPath,
 		4,
-		resumeProgress,
+		resumeReporter,
 		"testfile",
 	)
 
@@ -882,7 +880,7 @@ func TestSegmentedDownloadFailurePersistsWritten(t *testing.T) {
 		t.Fatalf("resumed Download: %v", err)
 	}
 
-	resumeProgress.Wait()
+	resumeReporter.Wait()
 
 	assertPartialContent(t, partialPath, content)
 	assertNoSegmentRestart(t, rangeStarts(), state.Segments)
@@ -906,14 +904,14 @@ func TestSegmentedDownloadSanitizesCorruptWritten(t *testing.T) {
 
 	prepareResumeFixture(t, partialPath, content, 0, state)
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		2,
-		progress,
+		reporter,
 		"testfile",
 	)
 
@@ -922,7 +920,7 @@ func TestSegmentedDownloadSanitizesCorruptWritten(t *testing.T) {
 		t.Fatalf("Download: %v", err)
 	}
 
-	progress.Wait()
+	reporter.Wait()
 
 	assertPartialContent(t, partialPath, content)
 }
@@ -938,14 +936,14 @@ func TestSegmentedDownloadTwoSegments(t *testing.T) {
 	dir := t.TempDir()
 	partialPath := filepath.Join(dir, "testfile.partial")
 
-	progress := mpb.New(mpb.WithOutput(io.Discard))
+	reporter := output.NewBarReporter(context.Background(), io.Discard)
 
 	downloader := NewDownloader(
 		source,
 		int64(len(content)),
 		partialPath,
 		2,
-		progress,
+		reporter,
 		"testfile",
 	)
 
@@ -954,7 +952,7 @@ func TestSegmentedDownloadTwoSegments(t *testing.T) {
 		t.Fatalf("Download: %v", err)
 	}
 
-	progress.Wait()
+	reporter.Wait()
 
 	got, err := os.ReadFile(partialPath)
 	if err != nil {

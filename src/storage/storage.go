@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"xget/src/config"
+	"xget/src/redact"
 )
 
 // Source represents a download source that can provide file content.
@@ -39,6 +40,6 @@ func NewSource(url string, aliases map[string]config.Alias, timeout time.Duratio
 	case strings.HasPrefix(url, "http://"), strings.HasPrefix(url, "https://"):
 		return NewHTTPSource(url, timeout), nil
 	default:
-		return nil, fmt.Errorf("unsupported URL scheme: %s", url)
+		return nil, fmt.Errorf("unsupported URL scheme: %s", redact.URL(url))
 	}
 }

@@ -16,6 +16,10 @@ const (
 	defaultTimeout         = 10 * time.Minute
 	defaultSegmentsPerFile = 4
 	defaultSegmentMinSize  = 10 * 1024 * 1024 // 10 MB.
+	defaultDebugInterval   = 5 * time.Second
+	// minDebugInterval keeps a tiny configured interval from spinning the stats
+	// reporter and flooding the output.
+	minDebugInterval = 100 * time.Millisecond
 )
 
 // Load reads and parses a YAML config file.
@@ -215,6 +219,14 @@ func mergeSettings(base *Settings, override *Settings) {
 	if override.SingleStream != "" {
 		base.SingleStream = override.SingleStream
 	}
+
+	if override.Debug != "" {
+		base.Debug = override.Debug
+	}
+
+	if override.DebugInterval > 0 {
+		base.DebugInterval = override.DebugInterval
+	}
 }
 
 func applyDefaults(cfg *Config) {
@@ -240,6 +252,14 @@ func applyDefaults(cfg *Config) {
 
 	if cfg.Settings.SegmentMinSize <= 0 {
 		cfg.Settings.SegmentMinSize = defaultSegmentMinSize
+	}
+
+	if cfg.Settings.DebugInterval <= 0 {
+		cfg.Settings.DebugInterval = defaultDebugInterval
+	}
+
+	if cfg.Settings.DebugInterval < minDebugInterval {
+		cfg.Settings.DebugInterval = minDebugInterval
 	}
 }
 

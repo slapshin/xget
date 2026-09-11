@@ -938,6 +938,122 @@ func TestSettingsIsSingleStream(t *testing.T) {
 	}
 }
 
+func TestSettingsIsDebug(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "true", value: "true", want: true},
+		{name: "uppercase true", value: "TRUE", want: true},
+		{name: "yes", value: "yes", want: true},
+		{name: "one", value: "1", want: true},
+		{name: "false", value: "false", want: false},
+		{name: "empty", value: "", want: false},
+		{name: "garbage", value: "enabled", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := Settings{Debug: tt.value}
+
+			if settings.IsDebug() != tt.want {
+				t.Errorf("IsDebug() with %q: expected %v", tt.value, tt.want)
+			}
+		})
+	}
+}
+
+func TestSettingsDebugFromEnv(t *testing.T) {
+	t.Setenv("DEBUG", "yes")
+	t.Setenv("DEBUG_INTERVAL", "3s")
+
+	cfg, err := parseConfigs(t, []string{`
+settings:
+  debug: ${DEBUG}
+  debug_interval: ${DEBUG_INTERVAL}
+
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Settings.IsDebug() {
+		t.Errorf("expected debug true, got %q", cfg.Settings.Debug)
+	}
+
+	if cfg.Settings.DebugInterval != 3*time.Second {
+		t.Errorf("expected debug_interval 3s, got %v", cfg.Settings.DebugInterval)
+	}
+}
+
+func TestSettingsDebugDefaults(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{`
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Settings.IsDebug() {
+		t.Errorf("expected debug disabled by default, got %q", cfg.Settings.Debug)
+	}
+
+	if cfg.Settings.DebugInterval != 5*time.Second {
+		t.Errorf("expected default debug_interval 5s, got %v", cfg.Settings.DebugInterval)
+	}
+}
+
+func TestSettingsDebugIntervalFloor(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{`
+settings:
+  debug_interval: 1ms
+
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if cfg.Settings.DebugInterval != 100*time.Millisecond {
+		t.Errorf("expected debug_interval raised to 100ms, got %v", cfg.Settings.DebugInterval)
+	}
+}
+
+func TestParseMultiple_DebugOverride(t *testing.T) {
+	cfg, err := parseConfigs(t, []string{
+		"settings:\n  debug: \"false\"\n  debug_interval: 1s\n",
+		"settings:\n  debug: \"true\"\n  debug_interval: 10s\n",
+		`
+files:
+  - url: http://example.com/file1.txt
+    dest: /tmp/file1.txt
+    sha256: abc123
+`,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if !cfg.Settings.IsDebug() {
+		t.Errorf("expected debug true after override, got %q", cfg.Settings.Debug)
+	}
+
+	if cfg.Settings.DebugInterval != 10*time.Second {
+		t.Errorf("expected debug_interval 10s after override, got %v", cfg.Settings.DebugInterval)
+	}
+}
+
 func TestParseMultiple_SingleStreamOverride(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -10,10 +10,10 @@ import (
 	"time"
 
 	"xget/src/config"
+	"xget/src/output"
+	"xget/src/redact"
 	"xget/src/segment"
 	"xget/src/storage"
-
-	"github.com/vbauerster/mpb/v8"
 )
 
 // DownloadResult represents the result of a single file download.
@@ -24,15 +24,17 @@ type DownloadResult struct {
 
 // Downloader manages parallel file downloads.
 type Downloader struct {
-	cfg   *config.Config
-	cache *Cache
+	cfg      *config.Config
+	cache    *Cache
+	reporter output.Reporter
 }
 
 // NewDownloader creates a new Downloader.
-func NewDownloader(cfg *config.Config, cache *Cache) *Downloader {
+func NewDownloader(cfg *config.Config, cache *Cache, reporter output.Reporter) *Downloader {
 	return &Downloader{
-		cfg:   cfg,
-		cache: cache,
+		cfg:      cfg,
+		cache:    cache,
+		reporter: reporter,
 	}
 }
 
@@ -43,8 +45,6 @@ func (downloader *Downloader) Download(ctx context.Context) []DownloadResult {
 		index  int
 		result DownloadResult
 	}, len(downloader.cfg.Files))
-
-	progress := mpb.NewWithContext(ctx)
 
 	// Create worker pool.
 	var wg sync.WaitGroup
@@ -61,7 +61,7 @@ func (downloader *Downloader) Download(ctx context.Context) []DownloadResult {
 
 			defer func() { <-semaphore }()
 
-			err := downloader.downloadFile(ctx, file, progress)
+			err := downloader.downloadFile(ctx, file)
 
 			resultCh <- struct {
 				index  int
@@ -84,12 +84,14 @@ func (downloader *Downloader) Download(ctx context.Context) []DownloadResult {
 		results[r.index] = r.result
 	}
 
-	progress.Wait()
+	downloader.reporter.Wait()
 
 	return results
 }
 
-func (downloader *Downloader) downloadFile(ctx context.Context, file config.FileEntry, progress *mpb.Progress) error {
+func (downloader *Downloader) downloadFile(ctx context.Context, file config.FileEntry) error {
+	downloader.reporter.Debugf("queued %s from %s (sha256 %s)", file.Dest, redact.URL(file.URL), file.SHA256)
+
 	// Check if destination file already exists with correct hash.
 	exists, err := downloader.checkExistingFile(file)
 	if err != nil {
@@ -97,45 +99,47 @@ func (downloader *Downloader) downloadFile(ctx context.Context, file config.File
 	}
 
 	if exists {
-		fmt.Printf("skipping %s (already exists with correct hash)\n", file.Dest)
+		downloader.reporter.Logf("skipping %s (already exists with correct hash)", file.Dest)
 
 		return nil
 	}
 
 	// Try to get from cache first.
-	cached := downloader.tryGetFromCache(ctx, file, progress)
+	cached := downloader.tryGetFromCache(ctx, file)
 	if cached {
+		downloader.reporter.Debugf("source for %s: cache", file.Dest)
+
 		return nil
 	}
 
 	// Download from source with retry.
-	return downloader.downloadWithRetry(ctx, file, progress)
+	return downloader.downloadWithRetry(ctx, file)
 }
 
-func (downloader *Downloader) tryGetFromCache(ctx context.Context, file config.FileEntry, progress *mpb.Progress) bool {
+func (downloader *Downloader) tryGetFromCache(ctx context.Context, file config.FileEntry) bool {
 	if downloader.cache == nil {
 		return false
 	}
 
-	cached, err := downloader.cache.Get(ctx, file.SHA256, file.Dest, progress)
+	cached, err := downloader.cache.Get(ctx, file.SHA256, file.Dest, downloader.reporter)
 	if err != nil {
-		fmt.Printf("cache check error for %s: %v\n", file.Dest, err)
+		downloader.reporter.Errorf("cache check for %s: %v", file.Dest, err)
 
 		return false
+	}
+
+	if !cached {
+		downloader.reporter.Debugf("cache miss for %s (sha256 %s)", file.Dest, file.SHA256)
 	}
 
 	return cached
 }
 
-func (downloader *Downloader) downloadWithRetry(
-	ctx context.Context,
-	file config.FileEntry,
-	progress *mpb.Progress,
-) error {
+func (downloader *Downloader) downloadWithRetry(ctx context.Context, file config.FileEntry) error {
 	var lastErr error
 
 	for attempt := 1; attempt <= downloader.cfg.Settings.Retries; attempt++ {
-		err := downloader.downloadFromSource(ctx, file, progress)
+		err := downloader.downloadFromSource(ctx, file)
 		if err == nil {
 			downloader.uploadToCache(ctx, file)
 
@@ -149,8 +153,8 @@ func (downloader *Downloader) downloadWithRetry(
 		}
 
 		if attempt < downloader.cfg.Settings.Retries {
-			fmt.Printf("attempt %d/%d for %s failed: %v, retrying...\n",
-				attempt, downloader.cfg.Settings.Retries, file.URL, err)
+			downloader.reporter.Errorf("attempt %d/%d for %s: %v, retrying in %s...",
+				attempt, downloader.cfg.Settings.Retries, redact.URL(file.URL), err, downloader.cfg.Settings.RetryDelay)
 			time.Sleep(downloader.cfg.Settings.RetryDelay)
 		}
 	}
@@ -163,8 +167,11 @@ func (downloader *Downloader) uploadToCache(ctx context.Context, file config.Fil
 		return
 	}
 
-	if err := downloader.cache.Put(ctx, file.SHA256, file.Dest); err != nil {
-		fmt.Printf("warning: could not cache %s: %v\n", file.Dest, err)
+	downloader.reporter.Debugf("uploading %s to cache (sha256 %s)", file.Dest, file.SHA256)
+
+	err := downloader.cache.Put(ctx, file.SHA256, file.Dest)
+	if err != nil {
+		downloader.reporter.Errorf("could not cache %s: %v", file.Dest, err)
 	}
 }
 
@@ -191,11 +198,7 @@ func (downloader *Downloader) checkExistingFile(file config.FileEntry) (bool, er
 	return valid, nil
 }
 
-func (downloader *Downloader) downloadFromSource(
-	ctx context.Context,
-	file config.FileEntry,
-	progress *mpb.Progress,
-) error {
+func (downloader *Downloader) downloadFromSource(ctx context.Context, file config.FileEntry) error {
 	source, err := storage.NewSource(file.URL, downloader.cfg.Aliases, downloader.cfg.Settings.Timeout)
 	if err != nil {
 		return fmt.Errorf("creating source: %w", err)
@@ -209,13 +212,13 @@ func (downloader *Downloader) downloadFromSource(
 	partialPath := file.Dest + ".partial"
 
 	// Try segmented download first.
-	segmented, err := downloader.trySegmentedDownload(ctx, source, file, partialPath, progress)
+	segmented, err := downloader.trySegmentedDownload(ctx, source, file, partialPath)
 	if err != nil {
 		return err
 	}
 
 	if !segmented {
-		err = downloader.singleStreamDownload(ctx, source, file, partialPath, progress)
+		err = downloader.singleStreamDownload(ctx, source, file, partialPath)
 		if err != nil {
 			return err
 		}
@@ -239,7 +242,6 @@ func (downloader *Downloader) trySegmentedDownload(
 	source storage.Source,
 	file config.FileEntry,
 	partialPath string,
-	progress *mpb.Progress,
 ) (bool, error) {
 	if downloader.cfg.Settings.IsSingleStream() {
 		return false, nil
@@ -269,12 +271,15 @@ func (downloader *Downloader) trySegmentedDownload(
 		return false, nil //nolint:nilerr // fall back to single stream when ranges unsupported.
 	}
 
+	downloader.reporter.Debugf("source for %s: %s (segmented, %d segments, %d bytes)",
+		file.Dest, redact.URL(file.URL), segmentsPerFile, totalSize)
+
 	segDownloader := segment.NewDownloader(
 		rangeSource,
 		totalSize,
 		partialPath,
 		segmentsPerFile,
-		progress,
+		downloader.reporter,
 		file.Dest,
 	)
 
@@ -291,7 +296,6 @@ func (downloader *Downloader) singleStreamDownload(
 	source storage.Source,
 	file config.FileEntry,
 	partialPath string,
-	progress *mpb.Progress,
 ) error {
 	// If a segment state file exists, the partial file was pre-allocated by a
 	// segmented download and its size does not reflect sequential progress.
@@ -310,7 +314,10 @@ func (downloader *Downloader) singleStreamDownload(
 
 	defer destFile.Close()
 
-	return downloader.performDownload(ctx, source, destFile, file, offset, progress)
+	downloader.reporter.Debugf("source for %s: %s (single stream, offset %d)",
+		file.Dest, redact.URL(file.URL), offset)
+
+	return downloader.performDownload(ctx, source, destFile, file, offset)
 }
 
 func openPartialFile(path string) (*os.File, int64, error) {
@@ -337,7 +344,6 @@ func (downloader *Downloader) performDownload(
 	destFile *os.File,
 	file config.FileEntry,
 	offset int64,
-	progressContainer *mpb.Progress,
 ) error {
 	reader, totalSize, err := source.Download(ctx, offset)
 	if err != nil {
@@ -346,19 +352,19 @@ func (downloader *Downloader) performDownload(
 
 	defer reader.Close()
 
-	progressWriter := NewProgressWriter(progressContainer, totalSize, file.Dest)
-	defer progressWriter.Abort()
+	tracker := downloader.reporter.NewTracker(totalSize, file.Dest)
+	defer tracker.Abort()
 
 	if offset > 0 {
-		progressWriter.SetCurrent(offset)
+		tracker.SetCurrent(offset)
 	}
 
-	_, err = io.Copy(io.MultiWriter(destFile, progressWriter), reader)
+	_, err = io.Copy(io.MultiWriter(destFile, tracker), reader)
 	if err != nil {
 		return fmt.Errorf("writing file: %w", err)
 	}
 
-	progressWriter.Finish()
+	tracker.Finish()
 
 	if err := destFile.Close(); err != nil {
 		return fmt.Errorf("closing file: %w", err)

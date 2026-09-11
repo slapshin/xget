@@ -59,6 +59,16 @@ type Settings struct {
 	SegmentsPerFile int           `yaml:"segments_per_file"`
 	SegmentMinSize  int64         `yaml:"segment_min_size"`
 	SingleStream    string        `yaml:"single_stream"`
+	Debug           string        `yaml:"debug"`
+	DebugInterval   time.Duration `yaml:"debug_interval"`
+}
+
+// IsDebug returns true if debug output is enabled.
+// Accepts "true", "1", "yes" (case-insensitive) as truthy values.
+func (settings Settings) IsDebug() bool {
+	v := strings.ToLower(strings.TrimSpace(settings.Debug))
+
+	return v == "true" || v == "1" || v == "yes"
 }
 
 // IsSingleStream returns true if segmented download is disabled.
@@ -82,6 +92,8 @@ func (settings *Settings) UnmarshalYAML(value *yaml.Node) error {
 		SegmentsPerFile string `yaml:"segments_per_file"`
 		SegmentMinSize  string `yaml:"segment_min_size"`
 		SingleStream    string `yaml:"single_stream"`
+		Debug           string `yaml:"debug"`
+		DebugInterval   string `yaml:"debug_interval"`
 	}
 
 	err := value.Decode(&raw)
@@ -119,7 +131,13 @@ func (settings *Settings) UnmarshalYAML(value *yaml.Node) error {
 		return err
 	}
 
+	err = parseDurationSetting("debug_interval", raw.DebugInterval, &settings.DebugInterval)
+	if err != nil {
+		return err
+	}
+
 	settings.SingleStream = strings.TrimSpace(expandEnvVars(raw.SingleStream))
+	settings.Debug = strings.TrimSpace(expandEnvVars(raw.Debug))
 
 	return nil
 }

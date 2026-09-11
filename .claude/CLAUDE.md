@@ -45,7 +45,7 @@ The application uses YAML config files (see `config.yaml.template` for full exam
 
 - **aliases**: Storage endpoint configurations (S3/MinIO)
 - **cache**: Optional S3-based caching layer
-- **settings**: Download behavior (parallel, retries, retry_delay)
+- **settings**: Download behavior (parallel, retries, retry_delay, debug, debug_interval)
 - **files**: List of files to download with URLs, destinations, and SHA256 checksums
 
 Every file entry requires `url`, `dest`, and `sha256` — config validation (`src/config/config.go`) rejects entries missing any of them, so test configs need a dummy `sha256`.
@@ -101,7 +101,30 @@ disabled entirely by `settings.single_stream: true`):
 
 - **download.go**: `NewDownloader(...)` / `Download()` — orchestrates per-segment range requests; invoked from `src/downloader.go`.
 - **state.go**: persistent resume state in a `.segments` file alongside `.partial` (`StatePath()`, `LoadState()`, `SaveState()`); tracks per-segment byte progress (`Written`, saved on a 1s throttle during transfer plus a final flush) so interrupted downloads resume mid-segment, not just at completed-segment boundaries.
-- **progress.go**: per-segment progress bar wiring.
+
+### Output Layer (`src/output/`)
+
+All user-facing output goes through the `output.Reporter` interface — nothing in the
+download path writes to stdout/stderr directly:
+
+- **reporter.go**: `Reporter` (`NewTracker`, `Logf`, `Debugf`, `Errorf`, `Wait`) and `Tracker` (`io.Writer` + `SetCurrent`/`Finish`/`Abort`) interfaces.
+- **bar.go**: `NewBarReporter(ctx, out)` — mpb progress bars; `Debugf` is a no-op. `Logf` routes through the mpb container only while bars are active, because a container with no bars silently discards writes.
+- **debug.go** / **stats.go**: `NewDebugReporter(out, errOut, interval)` — no bars, timestamped lines only, plus a stats line per running transfer (and a totals line for several) every `interval`.
+
+Debug mode is resolved in `applyDebugSettings` (`src/main.go`) from three sources, in
+increasing order of precedence: `settings.debug` in the config, the `XGET_DEBUG` env var
+(which also disables debug when set to a falsy value) and the `-debug`/`--debug` flag.
+`settings.debug_interval` (default 5s, floored at 100ms) sets the stats cadence. `Tracker.Abort()` must be
+deferred right after creating a tracker, or the bar container's `Wait` blocks forever on
+error paths.
+
+### Redaction (`src/redact/`)
+
+`redact.Secret()` masks a credential (keeps the last 4 chars) and `redact.URL()` masks
+any `user:password` embedded in a URL. Every place that prints a file URL — config dump,
+debug lines, retry errors, the final failure summary and `storage.NewSource`'s
+unsupported-scheme error — must go through `redact.URL()`, so output stays safe to paste
+into a log.
 
 ### Cache Layer (`src/cache.go`)
 
@@ -127,7 +150,7 @@ Files download to `.partial` suffix during transfer:
 
 ## Key Dependencies
 
-- **Progress bars**: `github.com/vbauerster/mpb/v8` — used in `src/progress.go`. Do NOT add `schollz/progressbar` (removed).
+- **Progress bars**: `github.com/vbauerster/mpb/v8` — used in `src/output/bar.go` only. Do NOT add `schollz/progressbar` (removed).
 - **S3 client**: `github.com/aws/aws-sdk-go-v2` family.
 - **YAML parsing**: `gopkg.in/yaml.v3`.
 
@@ -137,6 +160,9 @@ Tested:
 
 - `src/config/` — comprehensive (config parsing, merging, env expansion)
 - `src/segment/` — state and download tests (`state_test.go`, `download_test.go`)
+- `src/output/` — bar/debug reporter behaviour, stats formatting
+- `src/redact/` — credential and URL masking
+- `src/main.go` — debug mode resolution and argument parsing (`main_test.go`)
 - `src/generate.go` — full table-driven tests
 
 **No tests exist for:**
@@ -144,14 +170,18 @@ Tested:
 - `src/downloader.go`
 - `src/cache.go`
 - `src/storage/` (http.go, s3.go)
-- `src/progress.go`
 - `src/checksum.go`
 
 When touching those files, consider adding tests.
 
 ## Output / Logging
 
-The codebase currently uses plain `fmt.Printf` / `fmt.Fprintf(os.Stderr, ...)` for all output — there is no structured logger. The `go-codestyle.md` rule about `logrus.FieldLogger` describes the desired direction but is not yet implemented. Do not add logrus to new code without a broader refactor plan.
+Download-path output goes through `output.Reporter` (see Output Layer above): `Logf` for
+messages the user always needs, `Debugf` for source/segment detail shown only in debug mode,
+`Errorf` for failures. Startup banner, config dump and the final summary in `src/main.go` /
+`src/configprint.go` still use plain `fmt.Printf` / `fmt.Fprintf(os.Stderr, ...)`; there is no
+structured logger. The `go-codestyle.md` rule about `logrus.FieldLogger` describes the desired
+direction but is not yet implemented. Do not add logrus to new code without a broader refactor plan.
 
 ## Code Style
 

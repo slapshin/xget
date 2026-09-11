@@ -32,7 +32,11 @@ make lint           # golangci-lint --timeout=5m (33 linters active)
 
 **Segmented download state** (`src/segment/state.go`): interrupted downloads persist per-segment byte progress to a `.segments` JSON file (e.g., `file.partial.segments`). State is saved to disk every 1 second during transfer (throttled) plus a final flush. `sanitizeSegments()` repairs corrupt state (negative or out-of-range `Written` counters reset to 0; `Done` segments get `Written` set to full size). The state file is cleaned up by `downloader.go` after successful checksum verification.
 
-**ProgressWriter.Abort()** (`src/progress.go`): must be deferred immediately after creating a ProgressWriter. Without it, `progress.Wait()` blocks forever on error paths because mpb never sees the bar complete. This applies to both `ProgressWriter` and `SharedProgressWriter`.
+**Tracker.Abort()** (`src/output/`): must be deferred immediately after creating a tracker via `Reporter.NewTracker`. Without it, `Reporter.Wait()` blocks forever on error paths because mpb never sees the bar complete.
+
+**Never print a raw file URL** (`src/redact/`): use `redact.URL()` — URLs may carry `user:password` userinfo. This applies to debug lines, error messages and the final failure summary. `redact.Secret()` masks credentials for the config dump.
+
+**Output goes through `output.Reporter`** (`src/output/`): `NewBarReporter` renders mpb bars, `NewDebugReporter` renders timestamped raw lines plus periodic transfer stats (enabled by `settings.debug`, the `XGET_DEBUG` env var or the `-debug` flag, in that order of precedence; cadence from `settings.debug_interval`). Use `Logf` for always-visible messages, `Debugf` for debug-only detail (source, segment ranges), `Errorf` for failures. In bar mode `Logf` writes directly to stdout while no bar is active, because an mpb container with no bars discards writes.
 
 **Download flow** (`src/downloader.go`): segmented download is tried first (unless `single_stream` or `segments_per_file <= 1` or file < `segment_min_size` or source doesn't implement `RangeSource`). Falls back to single-stream. Partial files use `.partial` suffix; renamed to final dest after SHA256 verification passes. Checksum mismatch deletes the partial file and segment state.
 
@@ -40,16 +44,16 @@ make lint           # golangci-lint --timeout=5m (33 linters active)
 
 ## Test Coverage Gaps
 
-These files have **no tests**: `src/downloader.go`, `src/cache.go`, `src/storage/s3.go`, `src/progress.go`, `src/checksum.go`. When touching these, consider adding tests.
+These files have **no tests**: `src/downloader.go`, `src/cache.go`, `src/storage/s3.go`, `src/checksum.go`. When touching these, consider adding tests.
 
-Well-tested: `src/config/` (1146 lines, comprehensive merge/expansion/validation coverage), `src/segment/` (both state and download with resume/short-read/abort recovery), `src/generate.go` (table-driven), `src/storage/http_test.go` (HTTP/1.1 enforcement and range fallback).
+Well-tested: `src/config/` (1146 lines, comprehensive merge/expansion/validation coverage), `src/output/` (reporter routing, stats formatting), `src/redact/` (URL/secret masking), `src/segment/` (both state and download with resume/short-read/abort recovery), `src/generate.go` (table-driven), `src/storage/http_test.go` (HTTP/1.1 enforcement and range fallback).
 
 **Test patterns:** config tests use `ParseMultiple()` with inline YAML strings and `t.Helper()` assertion functions. Segment tests use `httptest.NewServer` to simulate range servers (including short-read, abort, and full-body-without-range scenarios). Use `t.TempDir()` for test isolation.
 
 ## Key Constraints
 
-- **Progress bars:** use `github.com/vbauerster/mpb/v8` only. Do NOT add `schollz/progressbar` (was removed).
-- **Logging:** codebase uses `fmt.Printf`/`fmt.Fprintf` — no structured logger. Do NOT add `logrus` without a broader refactor plan, even though `.claude/rules/go-codestyle.md` mentions it.
+- **Progress bars:** use `github.com/vbauerster/mpb/v8` only, and only inside `src/output/bar.go`. Do NOT add `schollz/progressbar` (was removed).
+- **Logging:** download-path output goes through `output.Reporter`; startup/summary output uses `fmt.Printf`/`fmt.Fprintf` — no structured logger. Do NOT add `logrus` without a broader refactor plan, even though `.claude/rules/go-codestyle.md` mentions it.
 - **Error style:** wrap with `fmt.Errorf("...: %w", err)`, compare with `errors.Is()`/`errors.As()`, don't use `failed` in wrap messages.
 - **Code style:** `any` not `interface{}`, lowercase log messages, singular package names, split multi-expression `if` to separate lines. See `.claude/rules/go-codestyle.md`.
 - **nolint annotations:** `//nolint:nilerr` is used intentionally where size/range probe errors are silently swallowed to fall back to single-stream download. Do not remove these without understanding the fallback behavior.

@@ -2,12 +2,11 @@ package main
 
 import (
 	"fmt"
-	"net/url"
 	"regexp"
 	"sort"
-	"strings"
 
 	"xget/src/config"
+	"xget/src/redact"
 )
 
 // printConfig prints a human-readable summary of the effective config,
@@ -20,6 +19,9 @@ func printConfig(cfg config.Config) {
 	fmt.Printf("  timeout:           %s\n", cfg.Settings.Timeout)
 	fmt.Printf("  segments_per_file: %d\n", cfg.Settings.SegmentsPerFile)
 	fmt.Printf("  segment_min_size:  %d\n", cfg.Settings.SegmentMinSize)
+	fmt.Printf("  single_stream:     %t\n", cfg.Settings.IsSingleStream())
+	fmt.Printf("  debug:             %t\n", cfg.Settings.IsDebug())
+	fmt.Printf("  debug_interval:    %s\n", cfg.Settings.DebugInterval)
 
 	fmt.Println("cache:")
 	fmt.Printf("  enabled: %t\n", cfg.Cache.IsEnabled())
@@ -54,7 +56,7 @@ func printFiles(files []config.FileEntry) {
 	fmt.Printf("files (%d):\n", len(files))
 
 	for _, file := range files {
-		fmt.Printf("  - url:  %s\n", redactURL(file.URL))
+		fmt.Printf("  - url:  %s\n", redact.URL(file.URL))
 		fmt.Printf("    dest: %s\n", file.Dest)
 
 		if file.SHA256 != "" {
@@ -75,15 +77,6 @@ func sortedAliasNames(aliases map[string]config.Alias) []string {
 	return names
 }
 
-// mask hides a secret, keeping the last 4 chars when length allows.
-func mask(secret string) string {
-	if len(secret) > 4 {
-		return "****" + secret[len(secret)-4:]
-	}
-
-	return "***"
-}
-
 // envPlaceholderPattern matches an unexpanded ${VAR} env var reference.
 var envPlaceholderPattern = regexp.MustCompile(`\$\{[^}]+\}`)
 
@@ -99,34 +92,5 @@ func maskTail(secret string) string {
 		return secret
 	}
 
-	return mask(secret)
-}
-
-// redactURL masks any user:password embedded in the URL.
-// The original string is returned when it has no userinfo or cannot be parsed.
-func redactURL(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil {
-		return raw
-	}
-
-	if parsed.User == nil {
-		return raw
-	}
-
-	// Build the masked userinfo manually: url.User would percent-encode the
-	// mask characters, so reconstruct around the authority marker instead.
-	masked := mask(parsed.User.String())
-	parsed.User = nil
-
-	// rest has the credentials stripped, so it is safe to return as-is if the
-	// authority marker is somehow absent.
-	rest := parsed.String()
-
-	idx := strings.Index(rest, "//")
-	if idx == -1 {
-		return rest
-	}
-
-	return rest[:idx+2] + masked + "@" + rest[idx+2:]
+	return redact.Secret(secret)
 }

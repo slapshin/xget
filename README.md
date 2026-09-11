@@ -71,7 +71,7 @@ docker run -v $(pwd)/config.yaml:/config.yaml xget /config.yaml
 ### Download Files
 
 ```bash
-xget <config.yaml>
+xget [-debug] <config.yaml>
 ```
 
 The tool takes one or more arguments - paths to YAML configuration files that define:
@@ -85,6 +85,30 @@ The tool takes one or more arguments - paths to YAML configuration files that de
 # Multiple configs can be passed; they are merged in order
 xget base.yaml overrides.yaml
 ```
+
+### Debug Output
+
+```bash
+xget -debug config.yaml
+
+# or without touching the command line
+XGET_DEBUG=1 xget config.yaml
+```
+
+Debug mode replaces the progress bars with plain timestamped lines, which makes the output usable in CI logs and non-interactive terminals. It reports:
+
+- the source each file comes from (cache, or the URL with the chosen mode: segmented with its segment count, or single stream with its resume offset)
+- transfer stats for every running download every `debug_interval` (default 5s), plus a totals line when more than one download is running
+- a completion line per file with the transferred size, duration and average speed
+- every error as it happens: retried attempts, per-segment failures and cache problems
+
+Debug mode has three sources, in increasing order of precedence:
+
+1. `settings.debug: true` in the config (supports `${VAR}` expansion like every other setting)
+2. the `XGET_DEBUG` environment variable — any of `true`, `1`, `yes` (case-insensitive) enables it, and any other value disables it even when the config enabled it
+3. the `-debug` / `--debug` flag, which always wins
+
+`settings.debug_interval` controls how often stats are reported (default 5s, values below 100ms are raised to 100ms).
 
 On startup, xget prints the effective merged configuration before downloading. Credentials are masked (only the last few characters are shown) and URL userinfo is redacted, so the output is safe to share in logs. Any unexpanded `${VAR}` placeholders are printed verbatim, making missing environment variables easy to spot.
 
@@ -199,6 +223,8 @@ settings:
   segments_per_file: 4  # parallel segments per large file (default: 4)
   segment_min_size: 10485760  # min file size for segmented download in bytes (default: 10MB)
   single_stream: false  # force single-stream download, disabling segmentation (default: false)
+  debug: false          # raw output instead of progress bars (default: false)
+  debug_interval: 5s    # stats reporting interval in debug mode (default: 5s, min: 100ms)
 
 # Files to download
 files:
@@ -224,7 +250,7 @@ The configuration supports environment variable expansion using `${VAR_NAME}` sy
 
 - **Alias fields** - Endpoint, region, bucket, prefix, access key, secret key, and `no_sign_request`
 - **Cache config** - The cache `alias` reference and `enabled` flag
-- **Download settings** - `parallel`, `retries`, `retry_delay`, `timeout`, `segments_per_file`, `segment_min_size`, `single_stream`
+- **Download settings** - `parallel`, `retries`, `retry_delay`, `timeout`, `segments_per_file`, `segment_min_size`, `single_stream`, `debug`, `debug_interval`
 - **File destination paths** - Customize download locations
 
 Unset `${VAR}` references are left as the literal `${VAR}` text rather than being emptied, which surfaces missing exports instead of silently downloading to the wrong place.
