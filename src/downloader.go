@@ -22,6 +22,27 @@ type DownloadResult struct {
 	Error error
 }
 
+// cacheLabelPrefix marks progress and debug output for transfers served by the
+// cache rather than by the origin URL.
+const cacheLabelPrefix = "[cache] "
+
+// transferJob describes a single source-to-destination transfer. The source is
+// built lazily so every retry attempt starts from a fresh one.
+type transferJob struct {
+	newSource func(ctx context.Context) (storage.Source, error)
+	dest      string
+	sha256    string
+	// label prefixes progress bars and debug lines for this transfer.
+	label string
+	// origin is a redacted, human-readable description of where bytes come from.
+	origin string
+}
+
+// partialPath returns the path bytes are written to until the checksum matches.
+func (job transferJob) partialPath() string {
+	return job.dest + ".partial"
+}
+
 // Downloader manages parallel file downloads.
 type Downloader struct {
 	cfg      *config.Config
@@ -113,15 +134,39 @@ func (downloader *Downloader) downloadFile(ctx context.Context, file config.File
 	}
 
 	// Download from source with retry.
-	return downloader.downloadWithRetry(ctx, file)
+	err = downloader.downloadFromSource(ctx, file)
+	if err != nil {
+		return err
+	}
+
+	downloader.uploadToCache(ctx, file)
+
+	return nil
 }
 
+func (downloader *Downloader) downloadFromSource(ctx context.Context, file config.FileEntry) error {
+	job := transferJob{
+		dest:   file.Dest,
+		sha256: file.SHA256,
+		label:  file.Dest,
+		origin: redact.URL(file.URL),
+		newSource: func(_ context.Context) (storage.Source, error) {
+			return storage.NewSource(file.URL, downloader.cfg.Aliases, downloader.cfg.Settings.Timeout)
+		},
+	}
+
+	return downloader.transferWithRetry(ctx, job)
+}
+
+// tryGetFromCache downloads the file from the cache when the content hash is
+// present there. It uses the same segmented, resumable and retrying transfer
+// path as an origin download.
 func (downloader *Downloader) tryGetFromCache(ctx context.Context, file config.FileEntry) bool {
 	if downloader.cache == nil {
 		return false
 	}
 
-	cached, err := downloader.cache.Get(ctx, file.SHA256, file.Dest, downloader.reporter)
+	cached, err := downloader.cache.Has(ctx, file.SHA256)
 	if err != nil {
 		downloader.reporter.Errorf("cache check for %s: %v", file.Dest, err)
 
@@ -130,36 +175,33 @@ func (downloader *Downloader) tryGetFromCache(ctx context.Context, file config.F
 
 	if !cached {
 		downloader.reporter.Debugf("cache miss for %s (sha256 %s)", file.Dest, file.SHA256)
+
+		return false
 	}
 
-	return cached
-}
+	downloader.reporter.Debugf("cache hit for %s (sha256 %s)", file.Dest, file.SHA256)
 
-func (downloader *Downloader) downloadWithRetry(ctx context.Context, file config.FileEntry) error {
-	var lastErr error
-
-	for attempt := 1; attempt <= downloader.cfg.Settings.Retries; attempt++ {
-		err := downloader.downloadFromSource(ctx, file)
-		if err == nil {
-			downloader.uploadToCache(ctx, file)
-
-			return nil
-		}
-
-		lastErr = err
-
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-
-		if attempt < downloader.cfg.Settings.Retries {
-			downloader.reporter.Errorf("attempt %d/%d for %s: %v, retrying in %s...",
-				attempt, downloader.cfg.Settings.Retries, redact.URL(file.URL), err, downloader.cfg.Settings.RetryDelay)
-			time.Sleep(downloader.cfg.Settings.RetryDelay)
-		}
+	job := transferJob{
+		dest:   file.Dest,
+		sha256: file.SHA256,
+		label:  cacheLabelPrefix + file.Dest,
+		origin: "cache",
+		newSource: func(sourceCtx context.Context) (storage.Source, error) {
+			return downloader.cache.NewSource(sourceCtx, file.SHA256)
+		},
 	}
 
-	return fmt.Errorf("all %d attempts: %w", downloader.cfg.Settings.Retries, lastErr)
+	// A failed cache transfer falls back to the origin. Any .partial and
+	// .segments files it leaves behind stay valid for that fallback: the cache
+	// key is the content hash, so both sources deliver identical bytes.
+	err = downloader.transferWithRetry(ctx, job)
+	if err != nil {
+		downloader.reporter.Errorf("cache download for %s: %v", file.Dest, err)
+
+		return false
+	}
+
+	return true
 }
 
 func (downloader *Downloader) uploadToCache(ctx context.Context, file config.FileEntry) {
@@ -198,33 +240,62 @@ func (downloader *Downloader) checkExistingFile(file config.FileEntry) (bool, er
 	return valid, nil
 }
 
-func (downloader *Downloader) downloadFromSource(ctx context.Context, file config.FileEntry) error {
-	source, err := storage.NewSource(file.URL, downloader.cfg.Aliases, downloader.cfg.Settings.Timeout)
+// transferWithRetry runs the transfer, retrying the configured number of times.
+// The source is rebuilt on every attempt so that state cached by a source (such
+// as a failed range-support probe) cannot poison later attempts.
+func (downloader *Downloader) transferWithRetry(ctx context.Context, job transferJob) error {
+	var lastErr error
+
+	for attempt := 1; attempt <= downloader.cfg.Settings.Retries; attempt++ {
+		err := downloader.transfer(ctx, job)
+		if err == nil {
+			return nil
+		}
+
+		lastErr = err
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if attempt < downloader.cfg.Settings.Retries {
+			downloader.reporter.Errorf("attempt %d/%d for %s from %s: %v, retrying in %s...",
+				attempt, downloader.cfg.Settings.Retries, job.dest, job.origin,
+				err, downloader.cfg.Settings.RetryDelay)
+			time.Sleep(downloader.cfg.Settings.RetryDelay)
+		}
+	}
+
+	return fmt.Errorf("all %d attempts: %w", downloader.cfg.Settings.Retries, lastErr)
+}
+
+func (downloader *Downloader) transfer(ctx context.Context, job transferJob) error {
+	source, err := job.newSource(ctx)
 	if err != nil {
 		return fmt.Errorf("creating source: %w", err)
 	}
 
-	err = os.MkdirAll(filepath.Dir(file.Dest), 0o755)
+	err = os.MkdirAll(filepath.Dir(job.dest), 0o755)
 	if err != nil {
 		return fmt.Errorf("creating destination directory: %w", err)
 	}
 
-	partialPath := file.Dest + ".partial"
+	partialPath := job.partialPath()
 
 	// Try segmented download first.
-	segmented, err := downloader.trySegmentedDownload(ctx, source, file, partialPath)
+	segmented, err := downloader.trySegmentedDownload(ctx, source, job, partialPath)
 	if err != nil {
 		return err
 	}
 
 	if !segmented {
-		err = downloader.singleStreamDownload(ctx, source, file, partialPath)
+		err = downloader.singleStreamDownload(ctx, source, job, partialPath)
 		if err != nil {
 			return err
 		}
 	}
 
-	err = finalizeDownload(partialPath, file)
+	err = finalizeDownload(partialPath, job)
 	if err != nil {
 		return err
 	}
@@ -240,7 +311,7 @@ func (downloader *Downloader) downloadFromSource(ctx context.Context, file confi
 func (downloader *Downloader) trySegmentedDownload(
 	ctx context.Context,
 	source storage.Source,
-	file config.FileEntry,
+	job transferJob,
 	partialPath string,
 ) (bool, error) {
 	if downloader.cfg.Settings.IsSingleStream() {
@@ -272,7 +343,7 @@ func (downloader *Downloader) trySegmentedDownload(
 	}
 
 	downloader.reporter.Debugf("source for %s: %s (segmented, %d segments, %d bytes)",
-		file.Dest, redact.URL(file.URL), segmentsPerFile, totalSize)
+		job.dest, job.origin, segmentsPerFile, totalSize)
 
 	segDownloader := segment.NewDownloader(
 		rangeSource,
@@ -280,7 +351,7 @@ func (downloader *Downloader) trySegmentedDownload(
 		partialPath,
 		segmentsPerFile,
 		downloader.reporter,
-		file.Dest,
+		job.label,
 	)
 
 	err = segDownloader.Download(ctx)
@@ -294,7 +365,7 @@ func (downloader *Downloader) trySegmentedDownload(
 func (downloader *Downloader) singleStreamDownload(
 	ctx context.Context,
 	source storage.Source,
-	file config.FileEntry,
+	job transferJob,
 	partialPath string,
 ) error {
 	// If a segment state file exists, the partial file was pre-allocated by a
@@ -315,9 +386,9 @@ func (downloader *Downloader) singleStreamDownload(
 	defer destFile.Close()
 
 	downloader.reporter.Debugf("source for %s: %s (single stream, offset %d)",
-		file.Dest, redact.URL(file.URL), offset)
+		job.dest, job.origin, offset)
 
-	return downloader.performDownload(ctx, source, destFile, file, offset)
+	return downloader.performDownload(ctx, source, destFile, job, offset)
 }
 
 func openPartialFile(path string) (*os.File, int64, error) {
@@ -342,7 +413,7 @@ func (downloader *Downloader) performDownload(
 	ctx context.Context,
 	source storage.Source,
 	destFile *os.File,
-	file config.FileEntry,
+	job transferJob,
 	offset int64,
 ) error {
 	reader, totalSize, err := source.Download(ctx, offset)
@@ -352,7 +423,7 @@ func (downloader *Downloader) performDownload(
 
 	defer reader.Close()
 
-	tracker := downloader.reporter.NewTracker(totalSize, file.Dest)
+	tracker := downloader.reporter.NewTracker(totalSize, job.label)
 	defer tracker.Abort()
 
 	if offset > 0 {
@@ -373,8 +444,8 @@ func (downloader *Downloader) performDownload(
 	return nil
 }
 
-func finalizeDownload(partialPath string, file config.FileEntry) error {
-	valid, err := VerifyFileSHA256(partialPath, file.SHA256)
+func finalizeDownload(partialPath string, job transferJob) error {
+	valid, err := VerifyFileSHA256(partialPath, job.sha256)
 	if err != nil {
 		return fmt.Errorf("verifying checksum: %w", err)
 	}
@@ -383,10 +454,10 @@ func finalizeDownload(partialPath string, file config.FileEntry) error {
 		os.Remove(partialPath)
 		os.Remove(segment.StatePath(partialPath))
 
-		return fmt.Errorf("checksum mismatch for %s", file.Dest)
+		return fmt.Errorf("checksum mismatch for %s", job.dest)
 	}
 
-	err = os.Rename(partialPath, file.Dest)
+	err = os.Rename(partialPath, job.dest)
 	if err != nil {
 		return fmt.Errorf("renaming file: %w", err)
 	}

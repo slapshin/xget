@@ -130,9 +130,20 @@ into a log.
 
 S3-based caching using SHA256 hash as the key:
 
-- `Get()`: Retrieves file from cache by hash
+- `Has()`: Reports whether the content hash is present in the cache
+- `NewSource()`: Builds a `storage.Source` for the cached object
 - `Put()`: Uploads successfully downloaded file to cache
 - Deduplicates downloads across configurations by content hash
+
+The cache does **not** implement its own transfer loop. `Cache` only locates the
+object; `tryGetFromCache` (`src/downloader.go`) then runs it through the same
+`transferJob` pipeline as an origin download, so cache hits get segmented parallel
+ranges, `.partial`/`.segments` resume and the configured retries. Cache transfers
+are labelled with `cacheLabelPrefix` (`[cache] `) in progress and debug output.
+
+Because the cache key is the content hash, a cache transfer and an origin download
+of the same entry produce identical bytes — so a failed cache attempt can leave its
+`.partial`/`.segments` files in place and the origin fallback resumes from them.
 
 ### Config System (`src/config/`)
 
@@ -164,10 +175,11 @@ Tested:
 - `src/redact/` — credential and URL masking
 - `src/main.go` — debug mode resolution and argument parsing (`main_test.go`)
 - `src/generate.go` — full table-driven tests
+- `src/downloader.go` — shared transfer pipeline (`downloader_test.go`): segmented vs
+  single stream, `.partial` resume, retry after a mid-body failure, checksum mismatch
 
 **No tests exist for:**
 
-- `src/downloader.go`
 - `src/cache.go`
 - `src/storage/` (http.go, s3.go)
 - `src/checksum.go`

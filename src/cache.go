@@ -3,12 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
-	"path/filepath"
 
 	"xget/src/config"
-	"xget/src/output"
 	"xget/src/storage"
 )
 
@@ -28,76 +25,30 @@ func NewCache(cfg *config.Config) *Cache {
 	return &Cache{alias: alias}
 }
 
-// Get retrieves a file from cache by its SHA256 hash.
-// Returns true if file was found in cache and downloaded successfully.
-func (cache *Cache) Get(ctx context.Context, sha256Hash, destPath string, reporter output.Reporter) (bool, error) {
+// NewSource creates a download source for the cached object stored under the
+// given SHA256 hash.
+func (cache *Cache) NewSource(ctx context.Context, sha256Hash string) (storage.Source, error) {
+	source, err := storage.NewS3SourceFromAlias(ctx, cache.alias, sha256Hash)
+	if err != nil {
+		return nil, fmt.Errorf("creating S3 source: %w", err)
+	}
+
+	return source, nil
+}
+
+// Has reports whether an object with the given SHA256 hash is present in cache.
+func (cache *Cache) Has(ctx context.Context, sha256Hash string) (bool, error) {
 	source, err := storage.NewS3SourceFromAlias(ctx, cache.alias, sha256Hash)
 	if err != nil {
 		return false, fmt.Errorf("creating S3 source: %w", err)
 	}
 
-	// Check if file exists in cache.
 	exists, err := source.Exists(ctx)
 	if err != nil {
 		return false, fmt.Errorf("checking cache: %w", err)
 	}
 
-	if !exists {
-		return false, nil
-	}
-
-	reporter.Debugf("cache hit for %s (sha256 %s)", destPath, sha256Hash)
-
-	// Download from cache.
-	reader, totalSize, err := source.Download(ctx, 0)
-	if err != nil {
-		return false, fmt.Errorf("downloading from cache: %w", err)
-	}
-
-	defer reader.Close()
-
-	// Ensure destination directory exists.
-	err = os.MkdirAll(filepath.Dir(destPath), 0o755)
-	if err != nil {
-		return false, fmt.Errorf("creating destination directory: %w", err)
-	}
-
-	// Create destination file.
-	file, err := os.Create(destPath)
-	if err != nil {
-		return false, fmt.Errorf("creating destination file: %w", err)
-	}
-
-	defer file.Close()
-
-	tracker := reporter.NewTracker(totalSize, "[cache] "+destPath)
-	defer tracker.Abort()
-
-	// Copy content.
-	_, err = io.Copy(io.MultiWriter(file, tracker), reader)
-	if err != nil {
-		os.Remove(destPath)
-
-		return false, fmt.Errorf("writing file: %w", err)
-	}
-
-	tracker.Finish()
-
-	// Verify checksum.
-	valid, err := VerifyFileSHA256(destPath, sha256Hash)
-	if err != nil {
-		os.Remove(destPath)
-
-		return false, fmt.Errorf("verifying checksum: %w", err)
-	}
-
-	if !valid {
-		os.Remove(destPath)
-
-		return false, fmt.Errorf("checksum mismatch from cache")
-	}
-
-	return true, nil
+	return exists, nil
 }
 
 // Put uploads a file to cache with its SHA256 hash as the key.
