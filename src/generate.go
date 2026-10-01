@@ -23,7 +23,7 @@ type GenerateOutput struct {
 func generateConfig(dirPath string) ([]byte, error) {
 	dirPath = filepath.Clean(dirPath)
 
-	info, err := os.Stat(dirPath)
+	info, err := os.Stat(dirPath) //nolint:gosec // G703: scanning this path is the point.
 	if err != nil {
 		return nil, fmt.Errorf("accessing directory: %w", err)
 	}
@@ -59,6 +59,7 @@ func walkDirectory(baseDir string) ([]config.FileEntry, error) {
 
 	var warnings []string
 
+	//nolint:gosec // G703: baseDir is the user's CLI argument; walking it is the point.
 	err := filepath.WalkDir(baseDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			warning := fmt.Sprintf("warning: cannot access %s: %v", path, err)
