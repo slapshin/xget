@@ -225,6 +225,7 @@ settings:
   single_stream: false  # force single-stream download, disabling segmentation (default: false)
   debug: false          # raw output instead of progress bars (default: false)
   debug_interval: 5s    # stats reporting interval in debug mode (default: 5s, min: 100ms)
+  full_verify: false    # always re-hash existing files, ignoring .xget sidecars (default: false)
 
 # Files to download
 files:
@@ -250,7 +251,7 @@ The configuration supports environment variable expansion using `${VAR_NAME}` sy
 
 - **Alias fields** - Endpoint, region, bucket, prefix, access key, secret key, and `no_sign_request`
 - **Cache config** - The cache `alias` reference and `enabled` flag
-- **Download settings** - `parallel`, `retries`, `retry_delay`, `timeout`, `segments_per_file`, `segment_min_size`, `single_stream`, `debug`, `debug_interval`
+- **Download settings** - `parallel`, `retries`, `retry_delay`, `timeout`, `segments_per_file`, `segment_min_size`, `single_stream`, `debug`, `debug_interval`, `full_verify`
 - **File destination paths** - Customize download locations
 
 Unset `${VAR}` references are left as the literal `${VAR}` text rather than being emptied, which surfaces missing exports instead of silently downloading to the wrong place.
@@ -308,7 +309,7 @@ Where `alias` references a storage endpoint defined in the `aliases` section.
 
 ### Download Pipeline
 
-1. **Check Existing File** - Verify if destination file exists with correct SHA256 hash (skip if valid)
+1. **Check Existing File** - Verify if destination file exists with correct SHA256 hash (skip if valid; see [Verification Sidecar](#verification-sidecar))
 2. **Try Cache** - Attempt to retrieve from cache by content hash (if cache enabled)
 3. **Download from Source** - Download with retry logic and exponential backoff
 4. **Verify Checksum** - Validate SHA256 hash against expected value
@@ -333,6 +334,16 @@ Downloads are saved with a `.partial` suffix during transfer:
 - Existing partial files are automatically resumed using HTTP Range requests
 - Only renamed to final destination after successful checksum verification
 - Failed downloads leave partial file intact for next retry attempt
+
+### Verification Sidecar
+
+Re-hashing a large existing file on every run is expensive (a 20 GB file means reading 20 GB).
+After a file is verified, xget writes a small `<dest>.xget` sidecar recording the hash together
+with the file's size and modification time. On the next run, if the hash in the sidecar equals
+the configured `sha256` and size and mtime are unchanged, the file is trusted without re-reading it
+(the same quick check `rsync` uses). Otherwise it is fully re-hashed and the sidecar refreshed.
+
+Set `full_verify: true` to ignore sidecars and always re-hash existing files.
 
 ### Caching Strategy
 
@@ -479,6 +490,7 @@ xget/
 │   ├── downloader.go        # Core download orchestration
 │   ├── cache.go             # S3-based caching layer
 │   ├── checksum.go          # SHA256 verification
+│   ├── sidecar.go           # .xget verification sidecar
 │   ├── progress.go          # Progress bar wrapper
 │   ├── generate.go          # Config generation from a directory
 │   ├── configprint.go       # Effective-config printer (with masking)

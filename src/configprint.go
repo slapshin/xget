@@ -22,6 +22,7 @@ func printConfig(cfg config.Config) {
 	fmt.Printf("  single_stream:     %t\n", cfg.Settings.IsSingleStream())
 	fmt.Printf("  debug:             %t\n", cfg.Settings.IsDebug())
 	fmt.Printf("  debug_interval:    %s\n", cfg.Settings.DebugInterval)
+	fmt.Printf("  full_verify:       %t\n", cfg.Settings.IsFullVerify())
 
 	fmt.Println("cache:")
 	fmt.Printf("  enabled: %t\n", cfg.Cache.IsEnabled())

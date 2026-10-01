@@ -53,7 +53,7 @@ The application uses YAML config files (see `config.yaml.template` for full exam
 
 - **aliases**: Storage endpoint configurations (S3/MinIO)
 - **cache**: Optional S3-based caching layer
-- **settings**: Download behavior (parallel, retries, retry_delay, debug, debug_interval)
+- **settings**: Download behavior (parallel, retries, retry_delay, debug, debug_interval, full_verify)
 - **files**: List of files to download with URLs, destinations, and SHA256 checksums
 
 Several config files can be passed (`xget a.yaml b.yaml`); `LoadMultiple` merges them
@@ -98,7 +98,8 @@ The `Source` interface abstracts download sources:
 
 Core download orchestration:
 
-1. Check if destination file exists with correct hash (skip if valid)
+1. Check if destination file exists with correct hash (skip if valid) — trusts the
+   `.xget` sidecar instead of re-hashing when size and mtime are unchanged
 2. Attempt cache retrieval (if cache enabled)
 3. Download from source with retry logic
 4. Verify SHA256 checksum
@@ -172,6 +173,20 @@ Files download to `.partial` suffix during transfer:
 - Only renamed to final destination after successful checksum verification
 - Failed downloads leave partial file for next retry
 
+### Verification Sidecar (`src/sidecar.go`)
+
+After a file passes SHA256 verification (fresh download, cache hit, or a full re-hash of
+an existing file), `<dest>.xget` records `{sha256, size, mtime_ns}`. On later runs
+`checkExistingFile` skips re-hashing when the sidecar's hash equals the configured one and
+size/mtime are unchanged — so a 20 GB file isn't re-read on every run. The sidecar must be
+written *after* the rename to `dest`, since it records dest's mtime. Missing, corrupt or
+unwritable sidecars just fall back to a full hash. The sidecar
+records the `FileInfo` taken *before* hashing (so edits during hashing aren't blessed) and
+is written via temp file + rename (atomic, never follows a symlink at `<dest>.xget`).
+Config validation rejects a `dest` equal to another entry's `dest + ".xget"`. `settings.full_verify: true` ignores
+sidecars and always re-hashes (a same-size in-place edit that restores mtime is the one
+case the quick check can't catch).
+
 ## Key Dependencies
 
 - **Progress bars**: `github.com/vbauerster/mpb/v8` — used in `src/output/bar.go` only. Do NOT add `schollz/progressbar` (removed).
@@ -189,7 +204,9 @@ Tested:
 - `src/main.go` — debug mode resolution and argument parsing (`main_test.go`)
 - `src/generate.go` — full table-driven tests
 - `src/downloader.go` — shared transfer pipeline (`downloader_test.go`): segmented vs
-  single stream, `.partial` resume, retry after a mid-body failure, checksum mismatch
+  single stream, `.partial` resume, retry after a mid-body failure, checksum mismatch,
+  sidecar-based existing-file check
+- `src/sidecar.go` — verification sidecar matching (`sidecar_test.go`)
 - `src/storage/http.go` — HTTP/1.1 enforcement and range requests (`http_test.go`)
 
 **No tests exist for:**

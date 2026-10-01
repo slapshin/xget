@@ -323,6 +323,7 @@ files:
 settings:
   parallel: 10
   retry_delay: 20s
+  full_verify: true
 `,
 	})
 	if err != nil {
@@ -339,6 +340,10 @@ settings:
 
 	if cfg.Settings.RetryDelay != 20*time.Second {
 		t.Errorf("expected retry_delay 20s, got %v", cfg.Settings.RetryDelay)
+	}
+
+	if !cfg.Settings.IsFullVerify() {
+		t.Errorf("expected full_verify true, got %q", cfg.Settings.FullVerify)
 	}
 }
 
@@ -885,6 +890,7 @@ settings:
   retries: 4
   retry_delay: 10s
   single_stream: true
+  full_verify: true
 
 files:
   - url: http://example.com/file1.txt
@@ -909,6 +915,34 @@ files:
 
 	if !cfg.Settings.IsSingleStream() {
 		t.Errorf("expected single_stream true, got %q", cfg.Settings.SingleStream)
+	}
+
+	if !cfg.Settings.IsFullVerify() {
+		t.Errorf("expected full_verify true, got %q", cfg.Settings.FullVerify)
+	}
+}
+
+func TestSettingsIsFullVerify(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{name: "true", value: "true", want: true},
+		{name: "uppercase yes", value: "YES", want: true},
+		{name: "one", value: "1", want: true},
+		{name: "false", value: "false", want: false},
+		{name: "empty", value: "", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings := Settings{FullVerify: tt.value}
+
+			if settings.IsFullVerify() != tt.want {
+				t.Errorf("IsFullVerify() with %q: expected %v", tt.value, tt.want)
+			}
+		})
 	}
 }
 
@@ -1256,6 +1290,33 @@ files:
 
 			if cfg.Cache.IsEnabled() != tt.expected {
 				t.Errorf("expected IsEnabled()=%v for value %q, got %v", tt.expected, tt.value, cfg.Cache.IsEnabled())
+			}
+		})
+	}
+}
+
+func TestValidateSidecarCollisions(t *testing.T) {
+	tests := []struct {
+		name    string
+		dests   []string
+		wantErr bool
+	}{
+		{name: "distinct dests", dests: []string{"/tmp/a.bin", "/tmp/b.bin"}},
+		{name: "dest is sidecar of another", dests: []string{"/tmp/a.bin", "/tmp/a.bin.xget"}, wantErr: true},
+		{name: "collision after cleaning", dests: []string{"/tmp/./a.bin", "/tmp/a.bin.xget"}, wantErr: true},
+		{name: "unrelated xget suffix", dests: []string{"/tmp/a.bin", "/tmp/b.bin.xget"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			files := make([]FileEntry, 0, len(tt.dests))
+			for _, dest := range tt.dests {
+				files = append(files, FileEntry{URL: "http://example.com/f", Dest: dest, SHA256: "abc"})
+			}
+
+			err := validateSidecarCollisions(files)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateSidecarCollisions() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

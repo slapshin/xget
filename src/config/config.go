@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path/filepath"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -20,6 +21,9 @@ const (
 	// minDebugInterval keeps a tiny configured interval from spinning the stats
 	// reporter and flooding the output.
 	minDebugInterval = 100 * time.Millisecond
+	// SidecarSuffix names the file next to a destination that records a
+	// successful checksum verification.
+	SidecarSuffix = ".xget"
 )
 
 // Load reads and parses a YAML config file.
@@ -216,6 +220,16 @@ func mergeSettings(base *Settings, override *Settings) {
 		base.SegmentMinSize = override.SegmentMinSize
 	}
 
+	if override.DebugInterval > 0 {
+		base.DebugInterval = override.DebugInterval
+	}
+
+	mergeFlagSettings(base, override)
+}
+
+// mergeFlagSettings merges the truthy-string settings, which are overridden
+// whenever a later config sets them at all.
+func mergeFlagSettings(base *Settings, override *Settings) {
 	if override.SingleStream != "" {
 		base.SingleStream = override.SingleStream
 	}
@@ -224,8 +238,8 @@ func mergeSettings(base *Settings, override *Settings) {
 		base.Debug = override.Debug
 	}
 
-	if override.DebugInterval > 0 {
-		base.DebugInterval = override.DebugInterval
+	if override.FullVerify != "" {
+		base.FullVerify = override.FullVerify
 	}
 }
 
@@ -287,6 +301,28 @@ func validate(cfg *Config) error {
 
 		if file.SHA256 == "" {
 			return fmt.Errorf("file %d: sha256 is required", i)
+		}
+	}
+
+	return validateSidecarCollisions(cfg.Files)
+}
+
+// validateSidecarCollisions rejects a dest that is another entry's
+// verification sidecar, which xget would otherwise overwrite.
+func validateSidecarCollisions(files []FileEntry) error {
+	dests := make(map[string]int, len(files))
+
+	for i, file := range files {
+		dests[filepath.Clean(file.Dest)] = i
+	}
+
+	for i, file := range files {
+		sidecar := filepath.Clean(file.Dest) + SidecarSuffix
+
+		other, exists := dests[sidecar]
+		if exists {
+			return fmt.Errorf("file %d: dest %q collides with the verification sidecar of file %d",
+				other, files[other].Dest, i)
 		}
 	}
 

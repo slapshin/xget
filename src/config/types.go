@@ -61,6 +61,7 @@ type Settings struct {
 	SingleStream    string        `yaml:"single_stream"`
 	Debug           string        `yaml:"debug"`
 	DebugInterval   time.Duration `yaml:"debug_interval"`
+	FullVerify      string        `yaml:"full_verify"`
 }
 
 // IsDebug returns true if debug output is enabled.
@@ -75,6 +76,15 @@ func (settings Settings) IsDebug() bool {
 // Accepts "true", "1", "yes" (case-insensitive) as truthy values.
 func (settings Settings) IsSingleStream() bool {
 	v := strings.ToLower(strings.TrimSpace(settings.SingleStream))
+
+	return v == "true" || v == "1" || v == "yes"
+}
+
+// IsFullVerify returns true if existing files must always be re-hashed instead
+// of trusting a matching verification sidecar.
+// Accepts "true", "1", "yes" (case-insensitive) as truthy values.
+func (settings Settings) IsFullVerify() bool {
+	v := strings.ToLower(strings.TrimSpace(settings.FullVerify))
 
 	return v == "true" || v == "1" || v == "yes"
 }
@@ -94,6 +104,7 @@ func (settings *Settings) UnmarshalYAML(value *yaml.Node) error {
 		SingleStream    string `yaml:"single_stream"`
 		Debug           string `yaml:"debug"`
 		DebugInterval   string `yaml:"debug_interval"`
+		FullVerify      string `yaml:"full_verify"`
 	}
 
 	err := value.Decode(&raw)
@@ -138,6 +149,7 @@ func (settings *Settings) UnmarshalYAML(value *yaml.Node) error {
 
 	settings.SingleStream = strings.TrimSpace(expandEnvVars(raw.SingleStream))
 	settings.Debug = strings.TrimSpace(expandEnvVars(raw.Debug))
+	settings.FullVerify = strings.TrimSpace(expandEnvVars(raw.FullVerify))
 
 	return nil
 }

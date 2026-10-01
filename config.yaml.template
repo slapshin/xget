@@ -39,6 +39,7 @@ settings:
   single_stream: false # force single-stream download, disable segmentation (or ${SINGLE_STREAM})
   debug: false # raw line output instead of progress bars, with periodic stats (or ${DEBUG}, or the XGET_DEBUG env var, or -debug)
   debug_interval: 5s # how often debug mode reports transfer stats (or ${DEBUG_INTERVAL})
+  full_verify: false # always re-hash existing files instead of trusting .xget sidecars (or ${FULL_VERIFY})
 
 # Files to download
 files:

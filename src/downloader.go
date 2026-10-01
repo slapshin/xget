@@ -232,12 +232,40 @@ func (downloader *Downloader) checkExistingFile(file config.FileEntry) (bool, er
 		return false, fmt.Errorf("destination is a directory")
 	}
 
+	trustSidecar := !downloader.cfg.Settings.IsFullVerify()
+	if trustSidecar && sidecarMatches(file.Dest, file.SHA256, info) {
+		downloader.reporter.Debugf("trusting %s for %s (size and mtime unchanged)",
+			sidecarPath(file.Dest), file.Dest)
+
+		return true, nil
+	}
+
 	valid, err := VerifyFileSHA256(file.Dest, file.SHA256)
 	if err != nil {
+		removeSidecar(file.Dest)
+
 		return false, err
 	}
 
-	return valid, nil
+	if !valid {
+		removeSidecar(file.Dest)
+
+		return false, nil
+	}
+
+	downloader.recordVerification(file.Dest, file.SHA256, info)
+
+	return true, nil
+}
+
+// recordVerification writes the sidecar that lets later runs skip re-hashing
+// dest. Failing to write it only costs a re-hash next time, so it is not fatal.
+func (downloader *Downloader) recordVerification(dest, sha256Hash string, info os.FileInfo) {
+	err := writeSidecar(dest, sha256Hash, info)
+	if err != nil {
+		removeSidecar(dest)
+		downloader.reporter.Debugf("recording verification of %s: %v", dest, err)
+	}
 }
 
 // transferWithRetry runs the transfer, retrying the configured number of times.
@@ -300,12 +328,28 @@ func (downloader *Downloader) transfer(ctx context.Context, job transferJob) err
 		return err
 	}
 
+	downloader.recordFinalizedDownload(job)
+
 	// Clean up segment state file after successful finalization.
 	if segmented {
 		os.Remove(segment.StatePath(partialPath))
 	}
 
 	return nil
+}
+
+// recordFinalizedDownload writes the sidecar for a download that was just
+// verified and renamed into place.
+func (downloader *Downloader) recordFinalizedDownload(job transferJob) {
+	info, err := os.Stat(job.dest)
+	if err != nil {
+		removeSidecar(job.dest)
+		downloader.reporter.Debugf("recording verification of %s: %v", job.dest, err)
+
+		return
+	}
+
+	downloader.recordVerification(job.dest, job.sha256, info)
 }
 
 func (downloader *Downloader) trySegmentedDownload(

@@ -198,6 +198,10 @@ func TestTransferWithRetry(t *testing.T) {
 			assertNotExists(t, job.partialPath())
 			assertNotExists(t, segment.StatePath(job.partialPath()))
 
+			if !sidecarMatches(dest, job.sha256, statTestFile(t, dest)) {
+				t.Errorf("sidecar %s does not record the verified download", sidecarPath(dest))
+			}
+
 			marker := "(single stream"
 			if test.wantSegmented {
 				marker = "(segmented,"
@@ -349,6 +353,94 @@ func TestTransferWithRetryChecksumMismatch(t *testing.T) {
 	assertNotExists(t, segment.StatePath(job.partialPath()))
 }
 
+func TestCheckExistingFile(t *testing.T) {
+	content := []byte(strings.Repeat("abcdefghij", 200))
+	// tampered has the same size as content, so only a full re-hash notices it.
+	tampered := []byte(strings.Repeat("ABCDEFGHIJ", 200))
+
+	tests := []struct {
+		name        string
+		fullVerify  string
+		onDisk      []byte
+		withSidecar bool
+		want        bool
+		wantSidecar bool
+	}{
+		{
+			name:        "trusts matching sidecar without re-hashing",
+			onDisk:      tampered,
+			withSidecar: true,
+			want:        true,
+			wantSidecar: true,
+		},
+		{
+			name:        "full verify ignores sidecar and drops it on mismatch",
+			fullVerify:  "true",
+			onDisk:      tampered,
+			withSidecar: true,
+		},
+		{
+			name:        "full verify refreshes sidecar of a valid file",
+			fullVerify:  "true",
+			onDisk:      content,
+			withSidecar: true,
+			want:        true,
+			wantSidecar: true,
+		},
+		{
+			name:        "valid file without sidecar gets one",
+			onDisk:      content,
+			want:        true,
+			wantSidecar: true,
+		},
+		{
+			name:   "invalid file without sidecar",
+			onDisk: tampered,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			settings := testSettings(1)
+			settings.FullVerify = test.fullVerify
+
+			downloader, _ := newTestDownloader(t, settings)
+			dest := filepath.Join(t.TempDir(), "file.bin")
+			writeTestFile(t, dest, content)
+
+			if test.withSidecar {
+				err := writeSidecar(dest, hashOf(content), statTestFile(t, dest))
+				if err != nil {
+					t.Fatalf("writeSidecar: %v", err)
+				}
+			}
+
+			// Rewrite in place keeping size and mtime, as a sidecar cannot detect.
+			modTime := statTestFile(t, dest).ModTime()
+			writeTestFile(t, dest, test.onDisk)
+			setTestModTime(t, dest, modTime)
+
+			file := config.FileEntry{Dest: dest, SHA256: hashOf(content)}
+
+			got, err := downloader.checkExistingFile(file)
+			if err != nil {
+				t.Fatalf("checkExistingFile: %v", err)
+			}
+
+			if got != test.want {
+				t.Errorf("checkExistingFile() = %v, want %v", got, test.want)
+			}
+
+			_, statErr := os.Stat(sidecarPath(dest))
+
+			hasSidecar := statErr == nil
+			if hasSidecar != test.wantSidecar {
+				t.Errorf("sidecar exists = %v, want %v", hasSidecar, test.wantSidecar)
+			}
+		})
+	}
+}
+
 func assertFileContent(t *testing.T, path string, want []byte) {
 	t.Helper()
 
@@ -368,5 +460,34 @@ func assertNotExists(t *testing.T, path string) {
 	_, err := os.Stat(path)
 	if !os.IsNotExist(err) {
 		t.Errorf("%s should not exist", path)
+	}
+}
+
+func writeTestFile(t *testing.T, path string, content []byte) {
+	t.Helper()
+
+	err := os.WriteFile(path, content, 0o600)
+	if err != nil {
+		t.Fatalf("writing %s: %v", path, err)
+	}
+}
+
+func statTestFile(t *testing.T, path string) os.FileInfo {
+	t.Helper()
+
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stating %s: %v", path, err)
+	}
+
+	return info
+}
+
+func setTestModTime(t *testing.T, path string, modTime time.Time) {
+	t.Helper()
+
+	err := os.Chtimes(path, modTime, modTime)
+	if err != nil {
+		t.Fatalf("setting mtime of %s: %v", path, err)
 	}
 }
